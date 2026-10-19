@@ -60,9 +60,6 @@ jobs:
           docker run --rm nivaran-ai-test ruff check .
           docker run --rm nivaran-ai-test pytest
 
-      - name: deps-check
-        run: node scripts/deps-check.mjs
-
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest

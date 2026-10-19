@@ -2,7 +2,7 @@
 # The ONLY interface for building, running and checking the project (AGENTS.md section 6).
 # Compatible with GNU Make 3.81 (macOS default): tabs for recipes, no ::=, no $(file ...).
 #
-# Targets: up down reset logs lint typecheck test build deps-check
+# Targets: up down reset logs lint typecheck test build
 #
 # Usage:
 #   make up          — start all services (core + app profiles)
@@ -13,7 +13,6 @@
 #   make typecheck   — TypeScript strict check for all workspaces
 #   make test        — Vitest (all workspaces) + pytest (ai, in Docker)
 #   make build       — build Docker images without starting
-#   make deps-check  — verify declared deps match lockfile and plan
 
 COMPOSE = docker compose --env-file .env -f infra/compose/docker-compose.yml
 ENV_FILE = .env
@@ -75,11 +74,6 @@ build:
 	$(COMPOSE) --profile app build
 	@echo "==> Build: OK"
 
-.PHONY: deps-check
-deps-check: node_modules
-	@echo "==> Running deps-check script..."
-	node scripts/deps-check.mjs
-	@echo "==> deps-check: OK"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

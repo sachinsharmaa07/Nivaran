@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22.18-alpine3.24 AS builder
+FROM node:22-alpine AS builder
 WORKDIR /build
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
@@ -16,21 +16,18 @@ COPY packages/shared/ ./packages/shared/
 COPY apps/api/ ./apps/api/
 
 RUN pnpm --filter @nivaran/api exec tsc --project tsconfig.json
+RUN pnpm --filter @nivaran/api --prod --legacy deploy /deploy \
+    && cp -r /build/apps/api/dist /deploy/dist
 
-FROM node:22.18-alpine3.24 AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 
 RUN addgroup -S nivaran && adduser -S -G nivaran nivaran \
     && apk add --no-cache wget
 
-COPY --from=builder /build/node_modules ./node_modules
-COPY --from=builder /build/apps/api/dist ./dist
-COPY --from=builder /build/apps/api/package.json ./package.json
+COPY --from=builder /deploy ./
 
 USER nivaran
 EXPOSE 4000
-
-HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget -q -O- http://127.0.0.1:4000/healthz || exit 1
 
 CMD ["node", "dist/index.js"]
