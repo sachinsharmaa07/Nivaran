@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "noEmit": true
+  },
+  "include": [
+    "vitest.config.ts",
+    "eslint.config.mjs",
+    "scripts/**/*.mjs",
+    "apps/api/src/__tests__/**/*.ts",
+    "apps/web/src/__tests__/**/*.tsx"
+  ],
+  "exclude": ["node_modules"]
+}

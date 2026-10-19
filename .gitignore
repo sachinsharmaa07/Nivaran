@@ -1,0 +1,33 @@
+# Nivaran — development and build artifacts
+node_modules/
+dist/
+.pnpm-store/
+*.local
+
+# Environment — never commit real secrets
+.env
+.env.*.local
+
+# OS and editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Docker volumes (local dev)
+data/
+
+# Logs
+*.log
