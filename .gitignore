@@ -3,6 +3,8 @@ node_modules/
 dist/
 .pnpm-store/
 *.local
+apps/web/vite.config.d.ts*
+apps/web/vite.config.js*
 
 # Environment — never commit real secrets
 .env

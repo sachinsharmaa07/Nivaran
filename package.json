@@ -15,7 +15,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "argon2"
     ]
   },
   "devDependencies": {

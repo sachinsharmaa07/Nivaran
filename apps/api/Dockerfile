@@ -15,12 +15,15 @@ COPY tsconfig.base.json ./
 COPY packages/shared/ ./packages/shared/
 COPY apps/api/ ./apps/api/
 
-RUN pnpm --filter @nivaran/api exec tsc --project tsconfig.json
+RUN pnpm --filter @nivaran/shared run build
+RUN pnpm --filter @nivaran/api run build
 RUN pnpm --filter @nivaran/api --prod --legacy deploy /deploy \
-    && cp -r /build/apps/api/dist /deploy/dist
+    && cp -r /build/apps/api/dist /deploy/dist \
+    && test -f /deploy/node_modules/@nivaran/shared/dist/index.js
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
+ENV IN_DOCKER=1
 
 RUN addgroup -S nivaran && adduser -S -G nivaran nivaran \
     && apk add --no-cache wget

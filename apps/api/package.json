@@ -11,10 +11,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nivaran/shared": "workspace:*",
+    "argon2": "0.45.1",
     "express": "5.1.0",
-    "pino": "9.7.0"
+    "jose": "6.2.12",
+    "node-pg-migrate": "9.0.0",
+    "pg": "8.23.1",
+    "pino": "9.7.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/express": "5.0.3"
+    "@types/express": "5.0.3",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "supertest": "7.3.1"
   }
 }

@@ -2,7 +2,7 @@
 # The ONLY interface for building, running and checking the project (AGENTS.md section 6).
 # Compatible with GNU Make 3.81 (macOS default): tabs for recipes, no ::=, no $(file ...).
 #
-# Targets: up down reset logs lint typecheck test build
+# Targets: up down reset logs lint typecheck test build migrate seed
 #
 # Usage:
 #   make up          — start all services (core + app profiles)
@@ -13,6 +13,8 @@
 #   make typecheck   — TypeScript strict check for all workspaces
 #   make test        — Vitest (all workspaces) + pytest (ai, in Docker)
 #   make build       — build Docker images without starting
+#   make migrate     — run database migrations
+#   make seed        — seed database with fake tenants and users
 
 COMPOSE = docker compose --env-file .env -f infra/compose/docker-compose.yml
 ENV_FILE = .env
@@ -71,9 +73,19 @@ test: node_modules
 .PHONY: build
 build:
 	@echo "==> Building all Docker images..."
-	$(COMPOSE) --profile app build
-	@echo "==> Build: OK"
+.PHONY: migrate
+migrate: node_modules
+	@echo "==> Running database migrations..."
+	pnpm --filter @nivaran/api run build
+	node --env-file=.env apps/api/dist/db/migrate.js
+	@echo "==> Migrations: OK"
 
+.PHONY: seed
+seed: node_modules
+	@echo "==> Seeding database..."
+	pnpm --filter @nivaran/api run build
+	node --env-file=.env apps/api/dist/db/seed.js
+	@echo "==> Seed: OK"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

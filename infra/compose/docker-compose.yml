@@ -110,7 +110,11 @@ services:
     env_file: ../../.env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      IN_DOCKER: "1"
       PORT: "4000"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
     ports:
       - "4000:4000"
     depends_on:
@@ -142,9 +146,14 @@ services:
     env_file: ../../.env
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      IN_DOCKER: "1"
     command: ["node", "dist/worker.js"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "pgrep -f 'dist/worker.js' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     depends_on:
       mongo:
         condition: service_healthy

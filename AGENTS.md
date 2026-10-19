@@ -11,3 +11,5 @@ Multi-tenant civic issue reporting platform (college capstone). Build fast, keep
 - Don't commit or push. No terraform apply. No destructive commands.
 - When done run `make lint typecheck test` once and reply in 6 lines max: files changed, results, blockers. No code in the reply, command output tail -30 only.
 - No new markdown files. Update PROGRESS.md only by ticking its checklist.
+- Never read, print or log .env or any secret value.
+- A task is not done until make up shows every container healthy and curl localhost:4000/readyz returns ready. Passing tests alone is not enough.
