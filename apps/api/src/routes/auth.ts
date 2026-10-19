@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import { registerSchema, loginSchema, otpSendSchema, otpVerifySchema } from "@nivaran/shared";
 import { PlatformDb } from "../db/platform-db.js";
 import { TenantDb } from "../db/tenant-db.js";
@@ -25,17 +25,33 @@ const REFRESH_COOKIE_NAME = "refreshToken";
 const REFRESH_TTL_DAYS = Number(process.env["REFRESH_TTL_DAYS"] ?? "14");
 const REFRESH_COOKIE_MAX_AGE = REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-function parseCookies(header?: string): Record<string, string> {
+export function parseCookies(header?: string): Record<string, string> {
   if (!header) return {};
   const list: Record<string, string> = {};
-  header.split(";").forEach((cookie) => {
-    const parts = cookie.split("=");
-    const name = parts[0]?.trim();
-    if (name) {
-      list[name] = decodeURIComponent(parts.slice(1).join("=").trim());
+  const pairs = header.split(";");
+  for (const pair of pairs) {
+    const eqIdx = pair.indexOf("=");
+    if (eqIdx === -1) continue;
+    const name = pair.slice(0, eqIdx).trim();
+    if (!name) continue;
+    let val = pair.slice(eqIdx + 1).trim();
+    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+      val = val.slice(1, -1);
     }
-  });
+    try {
+      list[name] = decodeURIComponent(val);
+    } catch {
+      list[name] = val;
+    }
+  }
   return list;
+}
+
+export function constantTimeCompare(a: string, b: string): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const hashA = createHash("sha256").update(a).digest();
+  const hashB = createHash("sha256").update(b).digest();
+  return timingSafeEqual(hashA, hashB);
 }
 
 function setRefreshCookie(res: Response, token: string): void {
@@ -54,29 +70,41 @@ function clearRefreshCookie(res: Response): void {
   );
 }
 
-function setOAuthCookies(res: Response, verifier: string, state: string): void {
-  const secure = process.env["NODE_ENV"] === "production" ? "; Secure" : "";
-  const maxAge = 600; // 10 minutes
-  res.append(
-    "Set-Cookie",
-    `g_verifier=${encodeURIComponent(verifier)}; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=${maxAge}${secure}`
-  );
-  res.append(
-    "Set-Cookie",
-    `g_state=${encodeURIComponent(state)}; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=${maxAge}${secure}`
-  );
+export function getOAuthCookieOptions(req?: Request) {
+  const isSecure =
+    process.env["NODE_ENV"] === "production" ||
+    (req?.secure ?? false) ||
+    req?.headers["x-forwarded-proto"] === "https";
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/api/v1/auth",
+    maxAge: 10 * 60 * 1000, // 10 minutes
+    secure: Boolean(isSecure),
+  };
 }
 
-function clearOAuthCookies(res: Response): void {
-  const secure = process.env["NODE_ENV"] === "production" ? "; Secure" : "";
-  res.append(
-    "Set-Cookie",
-    `g_verifier=; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=0${secure}`
-  );
-  res.append(
-    "Set-Cookie",
-    `g_state=; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=0${secure}`
-  );
+export function setOAuthCookies(
+  res: Response,
+  req: Request,
+  verifier: string,
+  state: string
+): void {
+  const options = getOAuthCookieOptions(req);
+  res.cookie("g_verifier", verifier, options);
+  res.cookie("g_state", state, options);
+}
+
+export function clearOAuthCookies(res: Response, req?: Request): void {
+  const options = getOAuthCookieOptions(req);
+  const clearOptions = {
+    httpOnly: options.httpOnly,
+    sameSite: options.sameSite,
+    path: options.path,
+    secure: options.secure,
+  };
+  res.clearCookie("g_verifier", clearOptions);
+  res.clearCookie("g_state", clearOptions);
 }
 
 // ── Register ─────────────────────────────────────────────────────────────────
@@ -256,7 +284,7 @@ authRouter.get("/google", async (req: Request, res: Response) => {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
 
-  setOAuthCookies(res, codeVerifier, state);
+  setOAuthCookies(res, req, codeVerifier, state);
 
   const clientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
   const redirectUri =
@@ -282,43 +310,80 @@ authRouter.get("/google", async (req: Request, res: Response) => {
 
 authRouter.get("/google/callback", async (req: Request, res: Response) => {
   const cookies = parseCookies(req.headers.cookie);
+  clearOAuthCookies(res, req);
+
   const stateParam = typeof req.query["state"] === "string" ? req.query["state"] : undefined;
   const code = typeof req.query["code"] === "string" ? req.query["code"] : undefined;
 
   if (!stateParam) {
+    console.warn("[OAuth] State parameter missing");
     throw new AppError("INVALID_STATE", "OAuth state parameter missing", 400);
   }
   if (!code) {
+    console.warn("[OAuth] Authorization code missing");
     throw new AppError("INVALID_CODE", "Authorization code missing", 400);
   }
 
   const verifier = cookies["g_verifier"];
   if (!verifier) {
+    console.warn("[OAuth] PKCE code verifier cookie missing");
     throw new AppError("INVALID_PKCE", "PKCE code verifier cookie missing", 400);
+  }
+
+  const stateCookie = cookies["g_state"];
+  if (!stateCookie) {
+    console.warn("[OAuth] State cookie missing");
+    throw new AppError(
+      "STATE_COOKIE_MISSING",
+      "OAuth state cookie missing. Please restart sign-in in the same browser",
+      400
+    );
+  }
+
+  if (!constantTimeCompare(stateCookie, stateParam)) {
+    console.warn("[OAuth] State mismatch");
+    throw new AppError("STATE_MISMATCH", "OAuth state mismatch", 400);
   }
 
   let statePayload: { nonce: string; tenantSlug: string };
   try {
     statePayload = await verifyOAuthState(stateParam);
-  } catch {
-    throw new AppError("INVALID_STATE", "Invalid or expired OAuth state", 400);
+  } catch (err: unknown) {
+    const isExpired =
+      (err &&
+        typeof err === "object" &&
+        "code" in err &&
+        (err as { code: string }).code === "ERR_JWT_EXPIRED") ||
+      (err instanceof Error && err.message.toLowerCase().includes("exp"));
+    if (isExpired) {
+      console.warn("[OAuth] State expired");
+      throw new AppError("STATE_EXPIRED", "OAuth state has expired", 400);
+    }
+    console.warn("[OAuth] State signature invalid");
+    throw new AppError("STATE_SIGNATURE_INVALID", "Invalid OAuth state signature", 400);
   }
 
-  const stateCookie = cookies["g_state"];
-  if (stateCookie && stateCookie !== stateParam) {
-    throw new AppError("INVALID_STATE", "OAuth state mismatch", 400);
+  const queryTenant =
+    typeof req.query["tenant"] === "string" ? req.query["tenant"].trim() : undefined;
+  const headerTenant =
+    typeof req.headers["x-tenant-slug"] === "string"
+      ? req.headers["x-tenant-slug"].trim()
+      : undefined;
+  const expectedTenant = queryTenant || headerTenant;
+  if (expectedTenant && expectedTenant !== statePayload.tenantSlug) {
+    console.warn("[OAuth] Tenant mismatch");
+    throw new AppError("TENANT_MISMATCH", "OAuth state tenant mismatch", 400);
   }
 
   const tenant = await platformDb.getTenantBySlug(statePayload.tenantSlug);
   if (!tenant) {
+    console.warn("[OAuth] Tenant not found");
     throw new AppError(
       "TENANT_NOT_FOUND",
       `Tenant '${statePayload.tenantSlug}' does not exist`,
       404
     );
   }
-
-  clearOAuthCookies(res);
 
   const tokens = await exchangeGoogleCode(code, verifier);
   const googleUser = await verifyGoogleIdToken(tokens.id_token);

@@ -8,6 +8,7 @@ import { PlatformDb } from "../db/platform-db.js";
 import { TenantDb } from "../db/tenant-db.js";
 import { signOAuthState } from "../auth/jwt.js";
 import { setGoogleAuthOverrides, resetGoogleAuthOverrides } from "../auth/google.js";
+import { parseCookies } from "../routes/auth.js";
 
 const TEST_CLIENT_ID = "test-google-client-id.apps.googleusercontent.com";
 process.env["GOOGLE_CLIENT_ID"] = TEST_CLIENT_ID;
@@ -190,19 +191,220 @@ describe("B1g: Google Sign-in Flow", () => {
       expect(loginRes.body.error.code).toBe("PASSWORD_LOGIN_DISABLED");
     });
 
-    it("rejects invalid or tampered state", async () => {
-      mockIdTokenToReturn = await signMockIdToken({
-        sub: "sub_1",
-        email: "test@punjab.local",
-        email_verified: true,
-      });
+    it("correctly parses a 211-character cookie value containing '=', '.', '-', '_', and '%'", () => {
+      const part1 = "eyJhbGciOiJIUzI1NiJ9."; // 21 chars, contains '.'
+      const part2 = "payload-data_with=eq"; // 20 chars, contains '-', '_', '='
+      const part3 = "%25encoded%20state_sig."; // 23 chars, contains '%', '_', '.'
+      // Total so far: 21 + 20 + 23 = 64
+      // Remaining for 211: 211 - 64 = 147 chars
+      const filler = "A".repeat(147);
+      const testValue211 = part1 + part2 + part3 + filler;
 
+      expect(testValue211.length).toBe(211);
+      expect(testValue211).toContain("=");
+      expect(testValue211).toContain(".");
+      expect(testValue211).toContain("-");
+      expect(testValue211).toContain("_");
+      expect(testValue211).toContain("%");
+
+      // Express res.cookie percent-encodes values
+      const encoded = encodeURIComponent(testValue211);
+      const cookieHeader = `other_cookie=xyz; g_state=${encoded}; g_verifier=abc`;
+      const parsed = parseCookies(cookieHeader);
+
+      expect(parsed["g_state"]).toBe(testValue211);
+      expect(parsed["g_state"]?.length).toBe(211);
+    });
+
+    it("cookie jar models SameSite=Lax: permits cross-site top-level GET redirect and clears cookies on completion", async () => {
+      interface CookieRecord {
+        name: string;
+        value: string;
+        httpOnly?: boolean;
+        sameSite?: string;
+        path?: string;
+        maxAge?: number;
+        expires?: Date;
+      }
+
+      class LaxCookieJar {
+        private jar = new Map<string, CookieRecord>();
+
+        setCookies(header: string | string[] | undefined): void {
+          if (!header) return;
+          const array = Array.isArray(header) ? header : [header];
+          for (const h of array) {
+            const parts = h.split(";").map((p) => p.trim());
+            const first = parts[0];
+            if (!first) continue;
+            const eqIdx = first.indexOf("=");
+            if (eqIdx === -1) continue;
+            const name = first.slice(0, eqIdx).trim();
+            const value = first.slice(eqIdx + 1).trim();
+
+            const record: CookieRecord = { name, value };
+            for (let i = 1; i < parts.length; i++) {
+              const part = parts[i]!;
+              const eq = part.indexOf("=");
+              const k = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase();
+              const v = eq === -1 ? "" : part.slice(eq + 1).trim();
+              if (k === "httponly") record.httpOnly = true;
+              else if (k === "samesite") record.sameSite = v.toLowerCase();
+              else if (k === "path") record.path = v;
+              else if (k === "max-age") {
+                const sec = Number(v);
+                if (sec <= 0) record.expires = new Date(0);
+              } else if (k === "expires") {
+                record.expires = new Date(v);
+              }
+            }
+
+            if (record.expires && record.expires.getTime() <= Date.now()) {
+              this.jar.delete(name);
+            } else {
+              this.jar.set(name, record);
+            }
+          }
+        }
+
+        getCookieHeader(req: {
+          path: string;
+          method?: string;
+          isTopLevelNavigation: boolean;
+          isSameSite: boolean;
+        }): string {
+          const matched: string[] = [];
+          for (const cookie of this.jar.values()) {
+            if (cookie.expires && cookie.expires.getTime() <= Date.now()) continue;
+            if (cookie.path && !req.path.startsWith(cookie.path)) continue;
+            const sSite = (cookie.sameSite || "lax").toLowerCase();
+            if (!req.isSameSite) {
+              if (sSite === "strict") continue;
+              if (sSite === "lax") {
+                const isGet = !req.method || req.method.toUpperCase() === "GET";
+                if (!req.isTopLevelNavigation || !isGet) continue;
+              }
+            }
+            matched.push(`${cookie.name}=${cookie.value}`);
+          }
+          return matched.join("; ");
+        }
+
+        has(name: string): boolean {
+          return this.jar.has(name);
+        }
+      }
+
+      const jar = new LaxCookieJar();
+
+      // 1. Initiate OAuth on /api/v1/auth/google
+      const initRes = await request(app).get("/api/v1/auth/google?tenant=demo-punjab&consent=true");
+      expect(initRes.status).toBe(302);
+      jar.setCookies(initRes.headers["set-cookie"]);
+
+      expect(jar.has("g_verifier")).toBe(true);
+      expect(jar.has("g_state")).toBe(true);
+
+      const loc = new URL(initRes.headers.location);
+      const stateParam = loc.searchParams.get("state")!;
+
+      // 2. Simulated cross-site non-top-level request (e.g. cross-site fetch): Lax cookies NOT sent
+      const blockedCookies = jar.getCookieHeader({
+        path: "/api/v1/auth/google/callback",
+        method: "GET",
+        isTopLevelNavigation: false,
+        isSameSite: false,
+      });
+      expect(blockedCookies).toBe("");
+
+      // 3. Simulated cross-site top-level GET navigation (browser redirect from accounts.google.com): Lax cookies SENT
+      const allowedCookies = jar.getCookieHeader({
+        path: "/api/v1/auth/google/callback",
+        method: "GET",
+        isTopLevelNavigation: true,
+        isSameSite: false,
+      });
+      expect(allowedCookies).toContain("g_verifier=");
+      expect(allowedCookies).toContain("g_state=");
+
+      // 4. Perform callback with the allowed cookies
+      const cbRes = await request(app)
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(stateParam)}`)
+        .set("Cookie", allowedCookies);
+
+      expect(cbRes.status).toBe(302);
+
+      // 5. Verify cookies cleared after callback on success
+      jar.setCookies(cbRes.headers["set-cookie"]);
+      expect(jar.has("g_verifier")).toBe(false);
+      expect(jar.has("g_state")).toBe(false);
+    });
+
+    it("fails with STATE_COOKIE_MISSING if state cookie is missing (restart sign-in message)", async () => {
+      const state = await signOAuthState({ nonce: "test-nonce", tenantSlug: "demo-punjab" });
       const res = await request(app)
-        .get("/api/v1/auth/google/callback?code=mock-code&state=tampered-invalid-state")
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(state)}`)
         .set("Cookie", ["g_verifier=mock-verifier"]);
 
       expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe("INVALID_STATE");
+      expect(res.body.error.code).toBe("STATE_COOKIE_MISSING");
+      expect(res.body.error.message).toContain("restart sign-in in the same browser");
+    });
+
+    it("fails with STATE_MISMATCH if state cookie does not match query state", async () => {
+      const state = await signOAuthState({ nonce: "test-nonce", tenantSlug: "demo-punjab" });
+      const res = await request(app)
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(state)}`)
+        .set("Cookie", ["g_verifier=mock-verifier", "g_state=different-state-value"]);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("STATE_MISMATCH");
+    });
+
+    it("fails with STATE_SIGNATURE_INVALID if state signature is tampered", async () => {
+      const tampered = "tampered-invalid-state";
+      const res = await request(app)
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${tampered}`)
+        .set("Cookie", ["g_verifier=mock-verifier", `g_state=${tampered}`]);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("STATE_SIGNATURE_INVALID");
+    });
+
+    it("fails with STATE_EXPIRED if state token has expired", async () => {
+      const expiredState = await new SignJWT({ nonce: "expired-nonce", tenantSlug: "demo-punjab" })
+        .setProtectedHeader({ alg: "HS256" })
+        .setIssuedAt(Math.floor(Date.now() / 1000) - 1000)
+        .setExpirationTime(Math.floor(Date.now() / 1000) - 100)
+        .sign(
+          new TextEncoder().encode(
+            process.env["JWT_ACCESS_SECRET"] ??
+              "nivaran-default-access-secret-at-least-32-chars-long"
+          )
+        );
+
+      const res = await request(app)
+        .get(
+          `/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(expiredState)}`
+        )
+        .set("Cookie", ["g_verifier=mock-verifier", `g_state=${expiredState}`]);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("STATE_EXPIRED");
+    });
+
+    it("fails with TENANT_MISMATCH if callback tenant does not match state tenant", async () => {
+      const state = await signOAuthState({ nonce: "nonce-1", tenantSlug: "demo-punjab" });
+      const res = await request(app)
+        .get(
+          `/api/v1/auth/google/callback?tenant=demo-maharashtra&code=mock-code&state=${encodeURIComponent(
+            state
+          )}`
+        )
+        .set("Cookie", ["g_verifier=mock-verifier", `g_state=${state}`]);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("TENANT_MISMATCH");
     });
 
     it("rejects token with wrong audience", async () => {
