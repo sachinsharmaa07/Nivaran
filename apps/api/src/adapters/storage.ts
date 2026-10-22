@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
+import { AppError } from "../middleware/error-handler.js";
 
 export function detectMimeType(buffer: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
   if (buffer.length < 12) return null;
@@ -88,31 +89,47 @@ export async function processAndStorePhoto(
   adapter: StorageAdapter = storageAdapter
 ): Promise<ProcessedPhoto> {
   if (rawBuffer.length > MAX_BYTES) {
-    throw new Error(`Photo exceeds 8 MB limit (got ${rawBuffer.length} bytes)`);
+    throw new AppError(
+      "PAYLOAD_TOO_LARGE",
+      `Photo exceeds 8 MB limit (got ${rawBuffer.length} bytes)`,
+      413
+    );
   }
 
   const mime = detectMimeType(rawBuffer);
   if (!mime) {
-    throw new Error("Unsupported image format. Only JPEG, PNG, WebP are allowed.");
+    throw new AppError(
+      "BAD_MAGIC_BYTES",
+      "Invalid image content: magic bytes do not match a valid JPEG, PNG, or WebP file",
+      400
+    );
   }
 
   // Strip EXIF / metadata (default in sharp), re-encode, cap dimensions to 2048 to save space
-  const sharpInst = sharp(rawBuffer).resize(2048, 2048, {
-    fit: "inside",
-    withoutEnlargement: true,
-  });
-
   let processedBuffer: Buffer;
   let ext: string;
-  if (mime === "image/jpeg") {
-    processedBuffer = await sharpInst.jpeg({ quality: 80 }).toBuffer();
-    ext = "jpg";
-  } else if (mime === "image/png") {
-    processedBuffer = await sharpInst.png({ compressionLevel: 8 }).toBuffer();
-    ext = "png";
-  } else {
-    processedBuffer = await sharpInst.webp({ quality: 80 }).toBuffer();
-    ext = "webp";
+  try {
+    const sharpInst = sharp(rawBuffer).resize(2048, 2048, {
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+
+    if (mime === "image/jpeg") {
+      processedBuffer = await sharpInst.jpeg({ quality: 80 }).toBuffer();
+      ext = "jpg";
+    } else if (mime === "image/png") {
+      processedBuffer = await sharpInst.png({ compressionLevel: 8 }).toBuffer();
+      ext = "png";
+    } else {
+      processedBuffer = await sharpInst.webp({ quality: 80 }).toBuffer();
+      ext = "webp";
+    }
+  } catch (_err) {
+    throw new AppError(
+      "BAD_MAGIC_BYTES",
+      "Invalid or corrupt image content: failed to decode image",
+      400
+    );
   }
 
   // Blur score: variance of a simple Laplacian (SPEC §9 image quality)

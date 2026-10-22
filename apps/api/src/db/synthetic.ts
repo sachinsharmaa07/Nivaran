@@ -78,6 +78,7 @@ const CATEGORIES = [
 ];
 
 export interface SyntheticCluster {
+  clusterId: string;
   tenantId: string;
   centerLat: number;
   centerLon: number;
@@ -91,9 +92,9 @@ export async function generateSyntheticIssues(opts?: {
   clustersPerTenant?: number;
   nearMissPerCluster?: number;
 }): Promise<SyntheticCluster[]> {
-  const issuesPerCluster = opts?.issuesPerCluster ?? 8;
+  const issuesPerCluster = opts?.issuesPerCluster ?? 7;
   const clustersPerTenant = opts?.clustersPerTenant ?? 10;
-  const nearMissPerCluster = opts?.nearMissPerCluster ?? 2;
+  const nearMissPerCluster = opts?.nearMissPerCluster ?? 3;
 
   const platformDb = new PlatformDb();
   const tenants = await platformDb.listTenants();
@@ -135,8 +136,10 @@ export async function generateSyntheticIssues(opts?: {
       const categoryCode = CATEGORIES[c % CATEGORIES.length]!;
       const category = categories.find((cat) => cat.code === categoryCode) ?? categories[0]!;
       const paraphrases = PARAPHRASES[categoryCode] ?? PARAPHRASES["pothole"]!;
+      const clusterId = `cluster-${tenant.code}-${c}`;
 
       tenantClusters.push({
+        clusterId,
         tenantId: tenant.id,
         centerLat: clusterCenter.lat,
         centerLon: clusterCenter.lon,
@@ -145,9 +148,9 @@ export async function generateSyntheticIssues(opts?: {
         nearMissIds: [],
       });
 
-      // Cluster issues within dedup radius
+      // 1. True duplicates within cluster: GPS noise up to 25m
       for (let i = 0; i < issuesPerCluster; i++) {
-        const noiseM = 5 + Math.random() * 20;
+        const noiseM = Math.random() * 25;
         const angle = Math.random() * 2 * Math.PI;
         const pt = addMetreOffset(
           clusterCenter.lat,
@@ -164,7 +167,7 @@ export async function generateSyntheticIssues(opts?: {
           clusterIndex: c,
           isNearMiss: false,
           pt,
-          noiseM,
+          noiseM: Math.max(1, Math.round(noiseM)),
           category,
           severity,
           desc,
@@ -172,9 +175,39 @@ export async function generateSyntheticIssues(opts?: {
         });
       }
 
-      // Near-miss negatives
-      for (let n = 0; n < nearMissPerCluster; n++) {
-        const dist = category.dedup_radius_m + 10 + Math.random() * 50;
+      // 2. Near-miss negatives at the SAME SPOT but DIFFERENT category
+      const diffCategories = categories.filter((cat) => cat.code !== categoryCode);
+      const sameSpotCount = Math.min(2, nearMissPerCluster);
+      for (let s = 0; s < sameSpotCount; s++) {
+        const diffCat = diffCategories[s % diffCategories.length] ?? category;
+        const diffParaphrases = PARAPHRASES[diffCat.code] ?? PARAPHRASES["garbage"]!;
+        const noiseM = Math.random() * 15;
+        const angle = Math.random() * 2 * Math.PI;
+        const pt = addMetreOffset(
+          clusterCenter.lat,
+          clusterCenter.lon,
+          noiseM * Math.sin(angle),
+          noiseM * Math.cos(angle)
+        );
+
+        if (!isInsideIndia(pt.lat, pt.lon)) continue;
+
+        pendingIssues.push({
+          clusterIndex: c,
+          isNearMiss: true,
+          pt,
+          noiseM: Math.max(1, Math.round(noiseM)),
+          category: diffCat,
+          severity: 1,
+          desc: diffParaphrases[s % diffParaphrases.length]!,
+          reporterId: `synthetic-diffcat-${c}-${s}`,
+        });
+      }
+
+      // 3. Near-miss negatives in same category but outside dedup radius
+      const distantCount = Math.max(0, nearMissPerCluster - sameSpotCount);
+      for (let n = 0; n < distantCount; n++) {
+        const dist = category.dedup_radius_m + 15 + Math.random() * 35;
         const angle = Math.random() * 2 * Math.PI;
         const pt = addMetreOffset(
           clusterCenter.lat,
@@ -189,11 +222,11 @@ export async function generateSyntheticIssues(opts?: {
           clusterIndex: c,
           isNearMiss: true,
           pt,
-          noiseM: 5,
+          noiseM: 10,
           category,
           severity: 1,
-          desc: paraphrases[n % paraphrases.length]!,
-          reporterId: `synthetic-nearmiss-${c}-${n}`,
+          desc: paraphrases[(paraphrases.length - 1 - n) % paraphrases.length]!,
+          reporterId: `synthetic-distant-${c}-${n}`,
         });
       }
     }
@@ -219,6 +252,8 @@ export async function generateSyntheticIssues(opts?: {
 
       return {
         publicId,
+        clusterId: `cluster-${tenant.code}-${p.clusterIndex}`,
+        isNearMiss: p.isNearMiss,
         status: "submitted",
         reporterId: p.reporterId,
         reporterIds: [p.reporterId],

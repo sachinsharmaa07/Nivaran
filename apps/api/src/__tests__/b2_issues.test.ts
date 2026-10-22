@@ -190,23 +190,34 @@ describe("B2 Issues — integration", () => {
     expect(uploadRes.body.data.mime).toBe("image/png");
     expect(uploadRes.body.data.blur_score).toBeGreaterThanOrEqual(0);
 
-    // Magic-byte check rejects non-image disguised buffer
+    // Unsupported media type returns 415
+    const gifRes = await request(app)
+      .put("/api/v1/issues/upload/issue-temp-123")
+      .set("Authorization", `Bearer ${punjabStaffToken}`)
+      .set("Content-Type", "image/gif")
+      .send(Buffer.from("GIF89a fake gif data"));
+    expect(gifRes.status).toBe(415);
+    expect(gifRes.body.error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
+
+    // Bad magic-byte check returns 400
     const fakeImage = Buffer.from("plain text disguised as image");
     const fakeRes = await request(app)
       .put("/api/v1/issues/upload/issue-temp-123")
       .set("Authorization", `Bearer ${punjabStaffToken}`)
       .set("Content-Type", "image/jpeg")
       .send(fakeImage);
-    expect(fakeRes.status).toBe(500); // Throws unsupported format
+    expect(fakeRes.status).toBe(400);
+    expect(fakeRes.body.error.code).toBe("BAD_MAGIC_BYTES");
 
-    // Exceeds 8 MB limit
+    // Exceeds 8 MB limit returns 413
     const hugeBuffer = Buffer.alloc(8 * 1024 * 1024 + 1024);
     const hugeRes = await request(app)
       .put("/api/v1/issues/upload/issue-temp-123")
       .set("Authorization", `Bearer ${punjabStaffToken}`)
       .set("Content-Type", "image/jpeg")
       .send(hugeBuffer);
-    expect(hugeRes.status).toBe(500); // Throws exceeds 8 MB limit
+    expect(hugeRes.status).toBe(413);
+    expect(hugeRes.body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
   // ── +1 Endpoint ─────────────────────────────────────────────────────────────

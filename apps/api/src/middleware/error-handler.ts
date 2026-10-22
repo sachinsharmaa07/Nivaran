@@ -42,6 +42,36 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     return;
   }
 
+  const anyErr = err as { status?: number; statusCode?: number; type?: string; message?: string };
+  const statusCode = anyErr?.status ?? anyErr?.statusCode;
+  const errType = anyErr?.type;
+
+  if (statusCode === 413 || errType === "entity.too.large") {
+    res
+      .status(413)
+      .json(
+        createErrorResponse(
+          "PAYLOAD_TOO_LARGE",
+          "Photo upload exceeds the maximum allowed size of 8 MB",
+          requestId
+        )
+      );
+    return;
+  }
+
+  if (statusCode === 415 || errType === "unsupported.media.type") {
+    res
+      .status(415)
+      .json(
+        createErrorResponse(
+          "UNSUPPORTED_MEDIA_TYPE",
+          "Unsupported media type. Only JPEG, PNG, and WebP are allowed.",
+          requestId
+        )
+      );
+    return;
+  }
+
   console.error(`[UnhandledError ${requestId}]`, err);
   res
     .status(500)

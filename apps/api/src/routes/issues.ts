@@ -254,15 +254,15 @@ issuesRouter.put("/upload/:issueId", async (req: Request, res: Response) => {
   const issueId = req.params["issueId"] as string;
   if (!issueId) throw new AppError("BAD_REQUEST", "issueId is required", 400);
 
-  const { processAndStorePhoto } = await import("../adapters/storage.js");
-
-  // Read raw body from buffer (req.body should be raw Buffer when content-type is image/*)
-  const rawBuffer: Buffer = Buffer.isBuffer(req.body)
-    ? req.body
-    : Buffer.from(req.body as ArrayBuffer);
-
-  if (!rawBuffer.length) {
-    throw new AppError("BAD_REQUEST", "Request body is empty", 400);
+  // Validate Content-Type: must be JPEG, PNG, or WebP
+  const rawContentType = (req.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase();
+  const allowedMimes = ["image/jpeg", "image/png", "image/webp"];
+  if (!rawContentType || !allowedMimes.includes(rawContentType)) {
+    throw new AppError(
+      "UNSUPPORTED_MEDIA_TYPE",
+      `Unsupported media type '${rawContentType || "unknown"}'. Only image/jpeg, image/png, and image/webp are allowed.`,
+      415
+    );
   }
 
   // Get tenant from JWT or header
@@ -271,6 +271,16 @@ issuesRouter.put("/upload/:issueId", async (req: Request, res: Response) => {
     throw new AppError("UNAUTHORIZED", "Authentication required for photo upload", 401);
   }
 
+  // Read raw body from buffer
+  const rawBuffer: Buffer = Buffer.isBuffer(req.body)
+    ? req.body
+    : Buffer.from((req.body as ArrayBuffer) || []);
+
+  if (!rawBuffer.length) {
+    throw new AppError("BAD_REQUEST", "Request body is empty", 400);
+  }
+
+  const { processAndStorePhoto } = await import("../adapters/storage.js");
   const result = await processAndStorePhoto(rawBuffer, tenantId, issueId);
 
   res.status(200).json({

@@ -1,7 +1,14 @@
 import net from "node:net";
 import fs from "node:fs";
 
+let redisConfigOverride: { host: string; port: number } | null = null;
+
+export function setRedisConfigOverride(override: { host: string; port: number } | null): void {
+  redisConfigOverride = override;
+}
+
 function getRedisConfig(): { host: string; port: number } {
+  if (redisConfigOverride) return redisConfigOverride;
   const raw = process.env["REDIS_URL"] ?? "redis://localhost:6379";
   const inDocker = Boolean(process.env["IN_DOCKER"]) || fs.existsSync("/.dockerenv");
   let host = "localhost";
@@ -19,12 +26,9 @@ function getRedisConfig(): { host: string; port: number } {
   return { host, port };
 }
 
-// In-memory fallback if Redis connection fails
-const memoryStore = new Map<string, { count: number; expiresAt: number }>();
-
 /**
  * Execute atomic rate limit increment in Redis using RESP protocol over net.Socket.
- * Falls back to in-memory store if Redis is unavailable.
+ * If Redis is unavailable, logs a warning and fails open.
  */
 export async function redisRateLimit(
   key: string,
@@ -79,22 +83,12 @@ export async function redisRateLimit(
         reject(new Error("Redis timeout"));
       });
     });
-  } catch {
-    // In-memory fallback
-    const now = Date.now();
-    let record = memoryStore.get(key);
-    if (!record || record.expiresAt <= now) {
-      record = { count: 1, expiresAt: now + windowSeconds * 1000 };
-      memoryStore.set(key, record);
-      return { current: 1, ttl: windowSeconds, allowed: true };
-    }
-    record.count++;
-    const ttl = Math.max(1, Math.ceil((record.expiresAt - now) / 1000));
-    return {
-      current: record.count,
-      ttl,
-      allowed: record.count <= limit,
-    };
+  } catch (err) {
+    // If Redis is down, log a warning and let the request through (fail-open)
+    console.warn(
+      `[RateLimiter] Redis is down (${(err as Error)?.message ?? String(err)}), allowing request for '${key}'`
+    );
+    return { current: 0, ttl: 0, allowed: true };
   }
 }
 
@@ -102,7 +96,6 @@ export async function redisRateLimit(
  * Reset all rate limit keys (for tests).
  */
 export async function resetRedisRateLimits(): Promise<void> {
-  memoryStore.clear();
   try {
     const { host, port } = getRedisConfig();
     await new Promise<void>((resolve) => {

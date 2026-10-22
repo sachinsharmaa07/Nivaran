@@ -19,10 +19,7 @@ connectMongo().catch(() => {
 export const app: Express = express();
 
 // Raw-body parser for photo upload endpoint (must come BEFORE express.json)
-app.use(
-  "/api/v1/issues/upload",
-  express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "8mb" })
-);
+app.use("/api/v1/issues/upload", express.raw({ type: "*/*", limit: "8mb" }));
 app.use(express.json());
 app.use(requestIdMiddleware);
 app.use(authMiddleware);

@@ -110,6 +110,8 @@ export interface IIssue extends Document {
   resolution?: ResolutionDoc | undefined;
   reopenCount: number;
   version: number;
+  clusterId?: string | undefined;
+  isNearMiss?: boolean | undefined;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -240,6 +242,8 @@ const IssueSchema = new Schema<IIssue>(
     resolution: ResolutionSchema,
     reopenCount: { type: Number, default: 0 },
     version: { type: Number, default: 1 },
+    clusterId: { type: String, index: true },
+    isNearMiss: { type: Boolean },
   },
   { timestamps: true }
 );
