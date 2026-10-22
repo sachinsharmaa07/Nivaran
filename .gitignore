@@ -28,8 +28,9 @@ __pycache__/
 # TypeScript incremental
 *.tsbuildinfo
 
-# Docker volumes (local dev)
+# Docker volumes and local uploads (local dev)
 data/
+uploads/
 
 # Logs
 *.log

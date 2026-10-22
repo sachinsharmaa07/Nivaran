@@ -87,6 +87,13 @@ seed: node_modules
 	node --env-file=.env apps/api/dist/db/seed.js
 	@echo "==> Seed: OK"
 
+.PHONY: eval-dedup
+eval-dedup: node_modules
+	@echo "==> Evaluating duplicate detection precision/recall..."
+	pnpm --filter @nivaran/api run build
+	node --env-file=.env apps/api/dist/db/eval-dedup.js
+	@echo "==> eval-dedup: OK"
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 $(ENV_FILE):
