@@ -2,11 +2,24 @@ import fs from "node:fs";
 import pg from "pg";
 
 export function resolvePostgresUrl(envUrl?: string): string {
+  const isTest = process.env["NODE_ENV"] === "test" || Boolean(process.env["VITEST"]);
   const raw =
     envUrl ||
     process.env["POSTGRES_OWNER_URL"] ||
     process.env["POSTGRES_APP_URL"] ||
-    "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran";
+    (isTest
+      ? "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran_test"
+      : "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran");
+
+  if (isTest) {
+    const lc = raw.toLowerCase();
+    if (lc.includes("/nivaran") && !lc.includes("/nivaran_test")) {
+      throw new Error(
+        `[TEST SAFETY] Connection string points at the dev database ('nivaran'). ` +
+          `Tests must use 'nivaran_test'. Refusing to run.`
+      );
+    }
+  }
 
   const inDocker = Boolean(process.env["IN_DOCKER"]) || fs.existsSync("/.dockerenv");
   // When running locally on host machine outside docker container,

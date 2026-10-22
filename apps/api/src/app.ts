@@ -9,9 +9,17 @@ import { platformRouter } from "./routes/platform.js";
 import { adminRouter } from "./routes/admin.js";
 import { publicRouter } from "./routes/public.js";
 import { issuesRouter } from "./routes/issues.js";
+import { connectMongo } from "./db/mongo.js";
+
+// Connect to Mongo lazily (non-blocking start; healthz checks TCP separately)
+connectMongo().catch(() => {
+  // ignore — will surface in /readyz
+});
 
 export const app: Express = express();
 
+// Raw-body parser for photo upload endpoint (must come BEFORE express.json)
+app.use("/api/v1/issues/upload", express.raw({ type: "*/*", limit: "8mb" }));
 app.use(express.json());
 app.use(requestIdMiddleware);
 app.use(authMiddleware);

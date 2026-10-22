@@ -115,6 +115,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    volumes:
+      - uploads_data:/data/uploads
     ports:
       - "4000:4000"
     depends_on:
@@ -211,3 +213,4 @@ volumes:
   mongo_data:
   postgres_data:
   redis_data:
+  uploads_data:

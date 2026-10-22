@@ -3,11 +3,11 @@
 FROM python:3.12-slim-bookworm AS deps
 WORKDIR /app
 COPY apps/ai/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=120 -r requirements.txt
 
 FROM deps AS test
 COPY apps/ai/requirements-dev.txt .
-RUN pip install --no-cache-dir -r requirements-dev.txt
+RUN pip install --no-cache-dir --default-timeout=120 -r requirements-dev.txt
 COPY apps/ai/pyproject.toml ./
 COPY apps/ai/main.py ./
 COPY apps/ai/tests ./tests
