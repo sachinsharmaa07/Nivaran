@@ -357,7 +357,7 @@ issuesRouter.post("/:publicId/transition", async (req: Request, res: Response) =
   // Evidence required for resolving categories that mandate it
   if (input.to === "resolved" && issue.category?.evidenceRequired) {
     const evidenceKeys = input.evidence_keys ?? [];
-    if (evidenceKeys.length === 0 && issue.evidence.length === 0) {
+    if (evidenceKeys.length === 0) {
       throw new AppError(
         "EVIDENCE_REQUIRED",
         "Resolution evidence is required for this category",
@@ -377,6 +377,13 @@ issuesRouter.post("/:publicId/transition", async (req: Request, res: Response) =
       resolvedAt: new Date(),
       responseDeadline: new Date(Date.now() + 7 * 86_400_000),
     };
+  }
+  if (input.to === "closed") {
+    extra["resolution.citizenResponse"] = "confirmed";
+    extra["resolution.closedAt"] = new Date();
+  }
+  if (input.to === "reopened") {
+    extra["resolution.citizenResponse"] = "disputed";
   }
 
   const updated = await repo.transition(publicId, input.to, extra as Partial<typeof issue>);
@@ -413,6 +420,12 @@ issuesRouter.post("/:publicId/merge", async (req: Request, res: Response) => {
   if (!tenantId) throw new AppError("UNAUTHORIZED", "Missing tenant in token", 401);
 
   const repo = new IssueRepo(tenantId);
+  const secondary = await repo.findByPublicId(publicId);
+  const primary = await repo.findByPublicId(input.primary_public_id);
+  if (!secondary || !primary) {
+    throw new AppError("NOT_FOUND", "Issue not found in this tenant", 404);
+  }
+
   await repo.mergeDuplicate(publicId, input.primary_public_id, actor.userId);
 
   await repo.appendAuditEvent({
@@ -513,6 +526,9 @@ issuesRouter.get("/:publicId/audit", async (req: Request, res: Response) => {
   if (!tenantId) throw new AppError("UNAUTHORIZED", "Authentication required", 401);
 
   const repo = new IssueRepo(tenantId);
+  const issue = await repo.findByPublicId(publicId);
+  if (!issue) throw new AppError("NOT_FOUND", `Issue '${publicId}' not found`, 404);
+
   const events = await repo.listAuditEvents(publicId);
 
   res.status(200).json({
@@ -523,5 +539,62 @@ issuesRouter.get("/:publicId/audit", async (req: Request, res: Response) => {
       payload: e.payload,
       at: e.createdAt,
     })),
+  });
+});
+
+// ── POST /api/v1/issues/:publicId/route — Route to department ───────────────
+
+const routeSchema = z.object({
+  department_id: z.string().min(1),
+});
+
+issuesRouter.post("/:publicId/route", async (req: Request, res: Response) => {
+  const publicId = req.params["publicId"] as string;
+  if (!publicId) throw new AppError("BAD_REQUEST", "publicId is required", 400);
+
+  const input = routeSchema.parse(req.body);
+  const actor = actorFromReq(req);
+  if ((ROLE_RANKS[actor.role] ?? 0) < ROLE_RANKS["staff"]!) {
+    throw new AppError("FORBIDDEN", "Only staff or above can route issues", 403);
+  }
+
+  const tenantId = req.user?.tid;
+  if (!tenantId) throw new AppError("UNAUTHORIZED", "Missing tenant in token", 401);
+
+  const tenantDb = new TenantDb(tenantId);
+  const dept = await tenantDb.getDepartment(input.department_id);
+  if (!dept) {
+    throw new AppError(
+      "DEPARTMENT_NOT_FOUND",
+      `Department '${input.department_id}' not found`,
+      404
+    );
+  }
+
+  const repo = new IssueRepo(tenantId);
+  const issue = await repo.findByPublicId(publicId);
+  if (!issue) throw new AppError("NOT_FOUND", `Issue '${publicId}' not found`, 404);
+
+  const updated = await repo.routeDepartment(publicId, {
+    id: dept.id,
+    code: dept.code,
+    name: dept.name,
+  });
+
+  await repo.appendAuditEvent({
+    issueId: publicId,
+    actor,
+    event: "DEPARTMENT_ROUTED",
+    payload: {
+      fromDepartment: issue.department?.code,
+      toDepartment: dept.code,
+    },
+  });
+
+  res.status(200).json({
+    data: {
+      public_id: publicId,
+      department: updated?.department,
+    },
   });
 });

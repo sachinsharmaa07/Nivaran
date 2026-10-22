@@ -9,8 +9,11 @@
  */
 import { PlatformDb } from "./platform-db.js";
 import { IssueRepo } from "./issue-repo.js";
-import { TenantDb } from "./tenant-db.js";
+import { TenantDb, type CategoryRow } from "./tenant-db.js";
 import { computePriority } from "../domain/algorithms.js";
+import { isInsideIndia } from "@nivaran/shared";
+import { disconnectMongo } from "./mongo.js";
+import { closePools } from "./config.js";
 
 const EARTH_RADIUS_M = 6_371_000;
 
@@ -18,13 +21,6 @@ function addMetreOffset(lat: number, lon: number, dNorthM: number, dEastM: numbe
   const dLat = (dNorthM / EARTH_RADIUS_M) * (180 / Math.PI);
   const dLon = (dEastM / (EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180))) * (180 / Math.PI);
   return { lat: lat + dLat, lon: lon + dLon };
-}
-
-function _gaussianNoise(stdM: number): number {
-  // Box-Muller transform
-  const u = 1 - Math.random();
-  const v = Math.random();
-  return stdM * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
 const PARAPHRASES: Record<string, string[]> = {
@@ -111,8 +107,22 @@ export async function generateSyntheticIssues(opts?: {
 
     const center = tenant.center;
 
+    // Collect all issue specifications for this tenant to batch-create
+    interface PendingIssue {
+      clusterIndex: number;
+      isNearMiss: boolean;
+      pt: { lat: number; lon: number };
+      noiseM: number;
+      category: CategoryRow;
+      severity: 1 | 2 | 3;
+      desc: string;
+      reporterId: string;
+    }
+
+    const pendingIssues: PendingIssue[] = [];
+    const tenantClusters: SyntheticCluster[] = [];
+
     for (let c = 0; c < clustersPerTenant; c++) {
-      // Place cluster within 10-25 km of tenant center
       const clusterDist = 2000 + Math.random() * 8000;
       const clusterAngle = Math.random() * 2 * Math.PI;
       const clusterCenter = addMetreOffset(
@@ -126,10 +136,16 @@ export async function generateSyntheticIssues(opts?: {
       const category = categories.find((cat) => cat.code === categoryCode) ?? categories[0]!;
       const paraphrases = PARAPHRASES[categoryCode] ?? PARAPHRASES["pothole"]!;
 
-      const clusterIssueIds: string[] = [];
-      const nearMissIds: string[] = [];
+      tenantClusters.push({
+        tenantId: tenant.id,
+        centerLat: clusterCenter.lat,
+        centerLon: clusterCenter.lon,
+        categoryCode,
+        issueIds: [],
+        nearMissIds: [],
+      });
 
-      // Create cluster issues within dedup radius (5-25 m GPS noise)
+      // Cluster issues within dedup radius
       for (let i = 0; i < issuesPerCluster; i++) {
         const noiseM = 5 + Math.random() * 20;
         const angle = Math.random() * 2 * Math.PI;
@@ -140,55 +156,23 @@ export async function generateSyntheticIssues(opts?: {
           noiseM * Math.cos(angle)
         );
 
-        // Validate that this point is inside India (skip if not)
-        const { isInsideIndia } = await import("@nivaran/shared");
         if (!isInsideIndia(pt.lat, pt.lon)) continue;
 
         const severity = (Math.floor(Math.random() * 3) + 1) as 1 | 2 | 3;
-        const priority = computePriority({
-          safetyRisk: category.default_safety_risk,
+        const desc = paraphrases[i % paraphrases.length]!;
+        pendingIssues.push({
+          clusterIndex: c,
+          isNearMiss: false,
+          pt,
+          noiseM,
+          category,
           severity,
-          facilityProximity: 0,
-          uniqueReporterCount: 1 + Math.floor(Math.random() * 5),
-          daysOpen: Math.floor(Math.random() * 15),
-          slaFraction: Math.random() * 0.8,
-          confidence: 0.85 + Math.random() * 0.15,
+          desc,
+          reporterId: `synthetic-user-${c}-${i}`,
         });
-
-        try {
-          const seq = await repo.nextSeq();
-          const publicId = `NVR-${tenant.code}-${String(seq).padStart(6, "0")}`;
-          const desc = paraphrases[i % paraphrases.length]!;
-
-          const issue = await repo.create({
-            publicId,
-            status: "submitted",
-            reporterId: `synthetic-user-${c}-${i}`,
-            reporterIds: [`synthetic-user-${c}-${i}`],
-            location: {
-              type: "Point",
-              coordinates: [pt.lon, pt.lat],
-              accuracyM: noiseM,
-            },
-            description: desc,
-            severity,
-            category: {
-              code: category.code,
-              names: category.names,
-              dedupRadiusM: category.dedup_radius_m,
-              defaultSafetyRisk: category.default_safety_risk,
-              evidenceRequired: category.evidence_required,
-            },
-            priority: { breakdown: priority },
-          });
-
-          clusterIssueIds.push(issue.publicId);
-        } catch {
-          // skip individual failures
-        }
       }
 
-      // Create near-miss negatives (10-60 m outside dedup radius)
+      // Near-miss negatives
       for (let n = 0; n < nearMissPerCluster; n++) {
         const dist = category.dedup_radius_m + 10 + Math.random() * 50;
         const angle = Math.random() * 2 * Math.PI;
@@ -199,57 +183,79 @@ export async function generateSyntheticIssues(opts?: {
           dist * Math.cos(angle)
         );
 
-        const { isInsideIndia } = await import("@nivaran/shared");
         if (!isInsideIndia(pt.lat, pt.lon)) continue;
 
-        try {
-          const seq = await repo.nextSeq();
-          const publicId = `NVR-${tenant.code}-${String(seq).padStart(6, "0")}`;
-          const issue = await repo.create({
-            publicId,
-            status: "submitted",
-            reporterId: `synthetic-nearmiss-${c}-${n}`,
-            reporterIds: [`synthetic-nearmiss-${c}-${n}`],
-            location: {
-              type: "Point",
-              coordinates: [pt.lon, pt.lat],
-              accuracyM: 5,
-            },
-            description: paraphrases[n % paraphrases.length]!,
-            severity: 1,
-            category: {
-              code: category.code,
-              names: category.names,
-              dedupRadiusM: category.dedup_radius_m,
-              defaultSafetyRisk: category.default_safety_risk,
-              evidenceRequired: category.evidence_required,
-            },
-            priority: {
-              breakdown: computePriority({
-                safetyRisk: 0.5,
-                severity: 1,
-                facilityProximity: 0,
-                uniqueReporterCount: 1,
-                daysOpen: 0,
-                slaFraction: 0,
-              }),
-            },
-          });
-          nearMissIds.push(issue.publicId);
-        } catch {
-          // skip
+        pendingIssues.push({
+          clusterIndex: c,
+          isNearMiss: true,
+          pt,
+          noiseM: 5,
+          category,
+          severity: 1,
+          desc: paraphrases[n % paraphrases.length]!,
+          reporterId: `synthetic-nearmiss-${c}-${n}`,
+        });
+      }
+    }
+
+    if (pendingIssues.length === 0) continue;
+
+    // Allocate seq numbers in a single atomic update
+    const startSeq = await repo.nextSeqBatch(pendingIssues.length);
+
+    const docsToCreate = pendingIssues.map((p, idx) => {
+      const seq = startSeq + idx;
+      const publicId = `NVR-${tenant.code}-${String(seq).padStart(6, "0")}`;
+
+      const priority = computePriority({
+        safetyRisk: p.category.default_safety_risk,
+        severity: p.severity,
+        facilityProximity: 0,
+        uniqueReporterCount: 1 + Math.floor(Math.random() * 5),
+        daysOpen: Math.floor(Math.random() * 15),
+        slaFraction: Math.random() * 0.8,
+        confidence: 0.85 + Math.random() * 0.15,
+      });
+
+      return {
+        publicId,
+        status: "submitted",
+        reporterId: p.reporterId,
+        reporterIds: [p.reporterId],
+        location: {
+          type: "Point" as const,
+          coordinates: [p.pt.lon, p.pt.lat] as [number, number],
+          accuracyM: p.noiseM,
+        },
+        description: p.desc,
+        severity: p.severity,
+        category: {
+          code: p.category.code,
+          names: p.category.names,
+          dedupRadiusM: p.category.dedup_radius_m,
+          defaultSafetyRisk: p.category.default_safety_risk,
+          evidenceRequired: p.category.evidence_required,
+        },
+        priority: { breakdown: priority },
+      };
+    });
+
+    const createdDocs = await repo.createMany(docsToCreate);
+
+    for (let i = 0; i < pendingIssues.length; i++) {
+      const p = pendingIssues[i]!;
+      const doc = createdDocs[i]!;
+      const cluster = tenantClusters[p.clusterIndex];
+      if (cluster) {
+        if (p.isNearMiss) {
+          cluster.nearMissIds.push(doc.publicId);
+        } else {
+          cluster.issueIds.push(doc.publicId);
         }
       }
-
-      clusters.push({
-        tenantId: tenant.id,
-        centerLat: clusterCenter.lat,
-        centerLon: clusterCenter.lon,
-        categoryCode,
-        issueIds: clusterIssueIds,
-        nearMissIds,
-      });
     }
+
+    clusters.push(...tenantClusters);
   }
 
   console.log(
@@ -269,7 +275,11 @@ const isDirectRun =
 
 if (isDirectRun) {
   generateSyntheticIssues()
-    .then(() => process.exit(0))
+    .then(async () => {
+      await disconnectMongo();
+      await closePools();
+      process.exit(0);
+    })
     .catch((err) => {
       console.error("Synthetic generation failed:", err);
       process.exit(1);

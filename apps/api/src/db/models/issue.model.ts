@@ -74,6 +74,7 @@ export interface ResolutionDoc {
 
 export interface DuplicateLinkDoc {
   primaryId?: string;
+  secondaryId?: string;
   mergedAt?: Date;
   mergedByUserId?: string;
 }
@@ -188,7 +189,7 @@ const ResolutionSchema = new Schema<ResolutionDoc>(
 );
 
 const DuplicateLinkSchema = new Schema<DuplicateLinkDoc>(
-  { primaryId: String, mergedAt: Date, mergedByUserId: String },
+  { primaryId: String, secondaryId: String, mergedAt: Date, mergedByUserId: String },
   { _id: false }
 );
 

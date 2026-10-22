@@ -1,6 +1,9 @@
 import { PlatformDb } from "./platform-db.js";
 import { TenantDb } from "./tenant-db.js";
 import { hashPassword } from "../auth/password.js";
+import { generateSyntheticIssues } from "./synthetic.js";
+import { closePools } from "./config.js";
+import { disconnectMongo } from "./mongo.js";
 
 // Category translations in en, hi, pa are unreviewed for prototype demo
 const SEED_CATEGORIES = [
@@ -68,7 +71,8 @@ const SEED_CATEGORIES = [
 
 const DEMO_PASSWORD = "Password123!"; // Fake password for seed data demo
 
-export async function seedDatabase(): Promise<void> {
+export async function seedDatabase(options: { includeSynthetic?: boolean } = {}): Promise<void> {
+  const includeSynthetic = options.includeSynthetic ?? true;
   const platformDb = new PlatformDb();
 
   const tenantsConfig = [
@@ -169,13 +173,62 @@ export async function seedDatabase(): Promise<void> {
       }
     }
 
-    // 2. Seed/update the 6 categories with translations
+    // 2a. Seed SLA policy
+    let slaPolicyId: string | undefined;
+    const existingSlas = await tenantDb.listSlaPolicies();
+    if (existingSlas.length > 0) {
+      slaPolicyId = existingSlas[0]!.id;
+    } else {
+      const sla = await tenantDb.createSlaPolicy({
+        name: "Standard 72h SLA",
+        respond_hours: 24,
+        resolve_hours: 72,
+        escalation_levels: [
+          { at_percent: 50, notify_role: "staff" },
+          { at_percent: 100, notify_role: "dept_head" },
+        ],
+      });
+      slaPolicyId = sla.id;
+    }
+
+    // 2b. Seed departments
+    const deptCodes = [
+      { code: "roads", name: "Roads & Infrastructure" },
+      { code: "sanitation", name: "Solid Waste & Sanitation" },
+      { code: "electrical", name: "Electrical & Street Lighting" },
+      { code: "water", name: "Water Supply & Sewerage" },
+    ];
+    const deptMap = new Map<string, string>();
+    const existingDepts = await tenantDb.listDepartments();
+    for (const d of deptCodes) {
+      const match = existingDepts.find((x) => x.code === d.code);
+      if (match) {
+        deptMap.set(d.code, match.id);
+      } else {
+        const created = await tenantDb.createDepartment(d);
+        deptMap.set(d.code, created.id);
+      }
+    }
+
+    const catToDept: Record<string, string> = {
+      pothole: "roads",
+      road_damage: "roads",
+      garbage: "sanitation",
+      streetlight: "electrical",
+      water_leakage: "water",
+      drainage: "water",
+    };
+
+    // 2c. Seed/update the 6 categories with translations, departments and SLAs
     for (const cat of SEED_CATEGORIES) {
+      const deptId = deptMap.get(catToDept[cat.code] ?? "roads");
       const existing = await tenantDb.getCategoryByCode(cat.code);
       if (!existing) {
         await tenantDb.createCategory({
           code: cat.code,
           names: cat.names,
+          department_id: deptId,
+          sla_policy_id: slaPolicyId,
           dedup_radius_m: cat.dedup_radius_m,
           default_safety_risk: cat.default_safety_risk,
           evidence_required: true,
@@ -184,6 +237,8 @@ export async function seedDatabase(): Promise<void> {
       } else {
         await tenantDb.updateCategory(existing.id, {
           names: cat.names,
+          department_id: deptId,
+          sla_policy_id: slaPolicyId,
         });
       }
     }
@@ -224,6 +279,11 @@ export async function seedDatabase(): Promise<void> {
     }
   }
 
+  if (includeSynthetic) {
+    console.log("Seeding synthetic issues...");
+    await generateSyntheticIssues();
+  }
+
   console.log("Seeding completed successfully.");
 }
 
@@ -232,7 +292,11 @@ const isDirectRun =
 
 if (isDirectRun) {
   seedDatabase()
-    .then(() => process.exit(0))
+    .then(async () => {
+      await disconnectMongo();
+      await closePools();
+      process.exit(0);
+    })
     .catch((err) => {
       console.error("Seed failed:", err);
       process.exit(1);

@@ -1,10 +1,8 @@
 /**
  * Global test setup — B2
- * Creates nivaran_test (Postgres) and uses nivaran_test (Mongo DB name).
- * Refuses to run if connection strings point at the dev database.
- * Runs migrations and seeds test data; drops everything in teardown.
+ * Creates, migrates, seeds and drops nivaran_test databases in both Postgres and Mongo.
+ * Refuses to run if any connection string points at the dev database.
  */
-import { beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import mongoose from "mongoose";
 import { runner } from "node-pg-migrate";
@@ -18,48 +16,63 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Safety: refuse to run against dev databases ───────────────────────────────
 
-function assertTestDatabase(url: string, label: string): void {
+export function assertTestDatabase(url: string, label: string): void {
   const lc = url.toLowerCase();
   // If the URL contains the word "nivaran" but not "nivaran_test", block it
   if (lc.includes("/nivaran") && !lc.includes("/nivaran_test")) {
     throw new Error(
       `[TEST SAFETY] ${label} URL points at the dev database ('nivaran'). ` +
-        `Tests must use 'nivaran_test'. Set POSTGRES_TEST_URL / MONGO_TEST_URI in your env.`
+        `Tests must use 'nivaran_test'. Refusing to run.`
     );
   }
 }
 
 // ── Resolve test URLs ──────────────────────────────────────────────────────────
 
-function resolveTestPostgresOwnerUrl(): string {
+export function resolveTestPostgresOwnerUrl(): string {
   const base =
     process.env["POSTGRES_TEST_OWNER_URL"] ??
     process.env["POSTGRES_OWNER_URL"] ??
-    "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran";
-  // Rewrite DB name to nivaran_test
-  return base.replace(/\/([^/?]+)(\?|$)/, "/nivaran_test$2");
+    "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran_test";
+  if (base.includes("/nivaran") && !base.includes("/nivaran_test")) {
+    assertTestDatabase(base, "POSTGRES_OWNER_URL");
+  }
+  return base;
 }
 
-function resolveTestPostgresAppUrl(): string {
+export function resolveTestPostgresAppUrl(): string {
   const base =
     process.env["POSTGRES_TEST_APP_URL"] ??
     process.env["POSTGRES_APP_URL"] ??
     process.env["POSTGRES_OWNER_URL"] ??
-    "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran";
-  return base.replace(/\/([^/?]+)(\?|$)/, "/nivaran_test$2");
+    "postgresql://nivaran_owner:nivaran_owner_pass@localhost:5432/nivaran_test";
+  if (base.includes("/nivaran") && !base.includes("/nivaran_test")) {
+    assertTestDatabase(base, "POSTGRES_APP_URL");
+  }
+  return base;
 }
 
-function resolveTestMongoUri(): string {
-  const base =
+export function resolveTestMongoUri(): string {
+  let base =
     process.env["MONGO_TEST_URI"] ??
     process.env["MONGO_URI"] ??
-    "mongodb://localhost:27017/nivaran?replicaSet=rs0";
-  return base.replace(/\/([^/?]+)(\?|$)/, "/nivaran_test$2");
+    "mongodb://localhost:27017/nivaran_test?directConnection=true";
+  if (base.includes("/nivaran") && !base.includes("/nivaran_test")) {
+    assertTestDatabase(base, "MONGO_URI");
+  }
+  if (!base.includes("directConnection=true") && !process.env["IN_DOCKER"]) {
+    base = base.replace(/replicaSet=[^&]+/, "directConnection=true");
+    if (!base.includes("directConnection=true")) {
+      base += (base.includes("?") ? "&" : "?") + "directConnection=true";
+    }
+  }
+  return base;
 }
 
-// ── Global setup / teardown ───────────────────────────────────────────────────
+// ── Setup & Teardown ──────────────────────────────────────────────────────────
 
-beforeAll(async () => {
+export async function setup(): Promise<void> {
+  process.env["NODE_ENV"] = "test";
   const pgOwnerUrl = resolveTestPostgresOwnerUrl();
   const pgAppUrl = resolveTestPostgresAppUrl();
   const mongoUri = resolveTestMongoUri();
@@ -73,16 +86,19 @@ beforeAll(async () => {
   process.env["POSTGRES_APP_URL"] = pgAppUrl;
   process.env["MONGO_URI"] = mongoUri;
 
-  // Create nivaran_test if it doesn't exist (connect to postgres maintenance DB)
+  // Connect to postgres maintenance DB
   const adminUrl = pgOwnerUrl.replace(/\/nivaran_test(\?|$)/, "/postgres$1");
   const adminClient = new pg.Client({ connectionString: adminUrl });
   await adminClient.connect();
-  const dbExists = await adminClient.query(
-    `SELECT 1 FROM pg_database WHERE datname = 'nivaran_test'`
-  );
-  if (dbExists.rowCount === 0) {
-    await adminClient.query(`CREATE DATABASE nivaran_test`);
-  }
+
+  // Terminate any existing connections to nivaran_test and recreate clean database
+  await adminClient.query(`
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE datname = 'nivaran_test' AND pid <> pg_backend_pid();
+  `);
+  await adminClient.query(`DROP DATABASE IF EXISTS nivaran_test`);
+  await adminClient.query(`CREATE DATABASE nivaran_test`);
   await adminClient.end();
 
   // Run migrations on nivaran_test
@@ -96,23 +112,55 @@ beforeAll(async () => {
     verbose: false,
   });
 
-  // Connect Mongo to nivaran_test
+  // Connect Mongo to nivaran_test, drop existing test db to ensure clean state
   await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+  await mongoose.connection.db?.dropDatabase();
 
-  // Seed test tenants and users
-  await seedDatabase();
-}, 60_000);
+  // Seed test tenants and users into nivaran_test
+  await seedDatabase({ includeSynthetic: false });
 
-afterAll(async () => {
-  // Drop all Mongo collections in test DB
-  if (mongoose.connection.readyState === mongoose.ConnectionStates.connected) {
-    const collections = await mongoose.connection.db?.listCollections().toArray();
-    if (collections) {
-      for (const col of collections) {
-        await mongoose.connection.db?.dropCollection(col.name);
-      }
-    }
-  }
+  await mongoose.disconnect();
   await disconnectMongo();
   await closePools();
-}, 30_000);
+}
+
+export async function teardown(): Promise<void> {
+  const pgOwnerUrl = resolveTestPostgresOwnerUrl();
+  const mongoUri = resolveTestMongoUri();
+
+  // Drop Mongo test database
+  try {
+    await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+    await mongoose.connection.db?.dropDatabase();
+    await mongoose.disconnect();
+    await disconnectMongo();
+  } catch {
+    // ignore
+  }
+
+  // Close Postgres pools
+  await closePools();
+
+  // Drop Postgres test database
+  try {
+    const adminUrl = pgOwnerUrl.replace(/\/nivaran_test(\?|$)/, "/postgres$1");
+    const adminClient = new pg.Client({ connectionString: adminUrl });
+    await adminClient.connect();
+    await adminClient.query(`
+      SELECT pg_terminate_backend(pid)
+      FROM pg_stat_activity
+      WHERE datname = 'nivaran_test' AND pid <> pg_backend_pid();
+    `);
+    await adminClient.query(`DROP DATABASE IF EXISTS nivaran_test`);
+    await adminClient.end();
+  } catch {
+    // ignore
+  }
+}
+
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  await setup();
+  return async () => {
+    await teardown();
+  };
+}

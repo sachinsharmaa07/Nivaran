@@ -43,7 +43,10 @@ export interface StorageAdapter {
 
 // ── Local-disk implementation ─────────────────────────────────────────────────
 
-const UPLOAD_ROOT = process.env["UPLOAD_DIR"] ?? "/data/uploads";
+const inDocker = Boolean(process.env["IN_DOCKER"]) || fs.existsSync("/.dockerenv");
+const UPLOAD_ROOT =
+  process.env["UPLOAD_DIR"] ??
+  (inDocker ? "/data/uploads" : path.resolve(process.cwd(), "uploads"));
 
 export class LocalStorageAdapter implements StorageAdapter {
   private readonly root: string;

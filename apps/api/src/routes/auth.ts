@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import { registerSchema, loginSchema, otpSendSchema, otpVerifySchema } from "@nivaran/shared";
 import { PlatformDb } from "../db/platform-db.js";
 import { TenantDb } from "../db/tenant-db.js";
@@ -17,6 +18,7 @@ import { exchangeGoogleCode, verifyGoogleIdToken } from "../auth/google.js";
 import { MockOtpAdapter } from "../adapters/otp.js";
 import { AppError } from "../middleware/error-handler.js";
 import { requireAuth } from "../middleware/auth.js";
+import { authRateLimiter } from "../middleware/rate-limit.js";
 
 export const authRouter: Router = Router();
 const platformDb = new PlatformDb();
@@ -109,7 +111,7 @@ export function clearOAuthCookies(res: Response, req?: Request): void {
 
 // ── Register ─────────────────────────────────────────────────────────────────
 
-authRouter.post("/register", async (req: Request, res: Response) => {
+authRouter.post("/register", authRateLimiter("register"), async (req: Request, res: Response) => {
   const input = registerSchema.parse(req.body);
 
   const tenant = await platformDb.getTenantBySlug(input.tenantSlug);
@@ -191,7 +193,7 @@ authRouter.post("/register", async (req: Request, res: Response) => {
 
 // ── Login ────────────────────────────────────────────────────────────────────
 
-authRouter.post("/login", async (req: Request, res: Response) => {
+authRouter.post("/login", authRateLimiter("login"), async (req: Request, res: Response) => {
   const input = loginSchema.parse(req.body);
 
   const tenant = await platformDb.getTenantBySlug(input.tenantSlug);
@@ -580,9 +582,37 @@ authRouter.post("/logout", async (req: Request, res: Response) => {
   res.status(200).json({ data: { message: "Logged out successfully" } });
 });
 
+// ── Forgot Password ──────────────────────────────────────────────────────────
+
+const forgotPasswordSchema = z.object({
+  tenantSlug: z.string().min(1, "Tenant slug is required"),
+  identifier: z.string().min(1, "Identifier is required"),
+});
+
+authRouter.post(
+  "/forgot-password",
+  authRateLimiter("forgot-password"),
+  async (req: Request, res: Response) => {
+    const input = forgotPasswordSchema.parse(req.body);
+    const tenant = await platformDb.getTenantBySlug(input.tenantSlug);
+    if (!tenant) {
+      throw new AppError("TENANT_NOT_FOUND", `Tenant '${input.tenantSlug}' does not exist`, 404);
+    }
+    const tenantDb = new TenantDb(tenant.id);
+    await tenantDb.findUserByIdentifier(input.identifier);
+
+    res.status(200).json({
+      data: {
+        message:
+          "If an account matches that identifier, password reset instructions have been sent.",
+      },
+    });
+  }
+);
+
 // ── Mock OTP ─────────────────────────────────────────────────────────────────
 
-authRouter.post("/otp/send", async (req: Request, res: Response) => {
+authRouter.post("/otp/send", authRateLimiter("otp-send"), async (req: Request, res: Response) => {
   const input = otpSendSchema.parse(req.body);
   await MockOtpAdapter.sendOtp(input.phone);
   res.status(200).json({ data: { message: "Demo OTP sent successfully" } });

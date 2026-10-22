@@ -38,12 +38,28 @@ export class IssueRepo {
     return doc.seq;
   }
 
+  async nextSeqBatch(count: number): Promise<number> {
+    await connectMongo();
+    const doc = await Counter.findOneAndUpdate(
+      { tenantId: this.tenantId },
+      { $inc: { seq: count } },
+      { upsert: true, new: true }
+    );
+    return doc.seq - count + 1;
+  }
+
   // ── CRUD ────────────────────────────────────────────────────────────────────
 
   async create(data: Omit<Partial<IIssue>, "tenantId">): Promise<IIssue> {
     await connectMongo();
     const doc = new Issue({ ...data, tenantId: this.tenantId });
     return doc.save();
+  }
+
+  async createMany(items: Omit<Partial<IIssue>, "tenantId">[]): Promise<IIssue[]> {
+    await connectMongo();
+    const docs = items.map((data) => ({ ...data, tenantId: this.tenantId }));
+    return (await Issue.insertMany(docs)) as unknown as IIssue[];
   }
 
   async findByPublicId(publicId: string): Promise<IIssue | null> {
@@ -109,9 +125,25 @@ export class IssueRepo {
     extra: Partial<IIssue> = {},
     session?: Sess
   ): Promise<IIssue | null> {
+    const inc: Record<string, number> = { version: 1 };
+    if (newStatus === "reopened") {
+      inc["reopenCount"] = 1;
+    }
     return Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId },
-      { $set: { status: newStatus, ...extra }, $inc: { version: 1 } },
+      { $set: { status: newStatus, ...extra }, $inc: inc },
+      { new: true, ...sess(session) }
+    ).exec();
+  }
+
+  async routeDepartment(
+    publicId: string,
+    department: { id?: string; code?: string; name?: string },
+    session?: Sess
+  ): Promise<IIssue | null> {
+    return Issue.findOneAndUpdate(
+      { tenantId: this.tenantId, publicId },
+      { $set: { department }, $inc: { version: 1 } },
       { new: true, ...sess(session) }
     ).exec();
   }
@@ -142,7 +174,12 @@ export class IssueRepo {
         {
           $addToSet: { reporterIds: { $each: secondary.reporterIds } },
           $push: {
-            duplicates: { primaryId: primaryPublicId, mergedAt: now, mergedByUserId },
+            duplicates: {
+              primaryId: primaryPublicId,
+              secondaryId: secondaryPublicId,
+              mergedAt: now,
+              mergedByUserId,
+            },
           },
           $inc: { version: 1 },
         },
@@ -158,13 +195,13 @@ export class IssueRepo {
   ): Promise<void> {
     await Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId: secondaryPublicId },
-      { $set: { status: "submitted" }, $unset: { duplicateOf: "" }, $inc: { version: 1 } },
+      { $set: { status: "submitted" }, $unset: { duplicateOf: 1 }, $inc: { version: 1 } },
       sess(session)
     ).exec();
 
     await Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId: primaryPublicId },
-      { $pull: { duplicates: { primaryId: primaryPublicId } }, $inc: { version: 1 } },
+      { $pull: { duplicates: { secondaryId: secondaryPublicId } }, $inc: { version: 1 } },
       sess(session)
     ).exec();
   }
