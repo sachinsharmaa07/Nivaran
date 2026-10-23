@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
+import { Search, MapPin, Building2 } from "lucide-react";
 import { useTranslation } from "../utils/i18n.js";
+import { Dialog, Select, TextInput, Button, Skeleton, EmptyState } from "../ui/index.js";
 
 export interface TenantInfo {
   id: string;
@@ -32,7 +34,7 @@ const FALLBACK_TENANTS: TenantInfo[] = [
     id: "demo-punjab-id",
     slug: "demo-punjab",
     code: "DPB",
-    name: "Municipal Corporation Ludhiana (Demo Punjab)",
+    name: "Municipal Corporation Ludhiana",
     ulb_type: "municipal_corporation",
     state_code: "PB",
     district: "Ludhiana",
@@ -43,7 +45,7 @@ const FALLBACK_TENANTS: TenantInfo[] = [
     id: "demo-maharashtra-id",
     slug: "demo-maharashtra",
     code: "DMH",
-    name: "Brihanmumbai Municipal Corporation (Demo Maharashtra)",
+    name: "Brihanmumbai Municipal Corporation",
     ulb_type: "municipal_corporation",
     state_code: "MH",
     district: "Mumbai",
@@ -54,7 +56,7 @@ const FALLBACK_TENANTS: TenantInfo[] = [
     id: "demo-tamil-nadu-id",
     slug: "demo-tamil-nadu",
     code: "DTN",
-    name: "Greater Chennai Corporation (Demo Tamil Nadu)",
+    name: "Greater Chennai Corporation",
     ulb_type: "municipal_corporation",
     state_code: "TN",
     district: "Chennai",
@@ -76,48 +78,44 @@ export function CityPicker({
 
   const [states, setStates] = useState<StateInfo[]>(FALLBACK_STATES);
   const [tenants, setTenants] = useState<TenantInfo[]>(FALLBACK_TENANTS);
+  const [loading, setLoading] = useState(false);
 
-  const [selectedState, setSelectedState] = useState<string>("");
+  const [selectedState, setSelectedState] = useState<string>("PB");
   const [selectedDistrict, setSelectedDistrict] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   useEffect(() => {
-    // Attempt fetching live data from public API
-    fetch("/api/v1/public/states")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { data?: StateInfo[] } | null) => {
-        if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
-          setStates(data.data);
+    setLoading(true);
+    void Promise.all([
+      fetch("/api/v1/public/states")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch("/api/v1/public/tenants")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ])
+      .then(([statesRes, tenantsRes]) => {
+        if (statesRes?.data && Array.isArray(statesRes.data) && statesRes.data.length > 0) {
+          setStates(statesRes.data);
+        }
+        if (tenantsRes?.data && Array.isArray(tenantsRes.data) && tenantsRes.data.length > 0) {
+          setTenants(tenantsRes.data);
         }
       })
-      .catch((_err: unknown) => {
-        // Fallback states used
-      });
-
-    fetch("/api/v1/public/tenants")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { data?: TenantInfo[] } | null) => {
-        if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
-          setTenants(data.data);
-        }
-      })
-      .catch((_err: unknown) => {
-        // Fallback tenants used
+      .finally(() => {
+        setLoading(false);
       });
   }, []);
 
-  if (!isOpen) return null;
-
-  // Filter districts available for the selected state
   const availableDistricts = Array.from(
     new Set(
       tenants
         .filter((t) => !selectedState || t.state_code.toUpperCase() === selectedState.toUpperCase())
         .map((t) => t.district)
+        .filter(Boolean)
     )
   ).sort();
 
-  // Filter ULBs by state, district, and search query
   const filteredUlbs = tenants.filter((t) => {
     if (selectedState && t.state_code.toUpperCase() !== selectedState.toUpperCase()) return false;
     if (selectedDistrict && t.district.toLowerCase() !== selectedDistrict.toLowerCase())
@@ -140,218 +138,234 @@ export function CityPicker({
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(15, 23, 42, 0.75)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        padding: "1rem",
-      }}
+    <Dialog
+      isOpen={isOpen}
+      onClose={onClose ? onClose : () => undefined}
+      title={t("city_picker_title") || "Select Your Municipality"}
+      description="Choose your state, district and local body to report and track issues"
+      maxWidth="540px"
     >
-      <div
-        style={{
-          backgroundColor: "#ffffff",
-          borderRadius: "16px",
-          width: "100%",
-          maxWidth: "560px",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-          padding: "2rem",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.25rem",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: "0 0 0.5rem 0", color: "#0f172a", fontSize: "1.5rem" }}>
-            {t("city_picker_title")}
-          </h2>
-          <p style={{ margin: 0, color: "#64748b", fontSize: "0.875rem" }}>
-            {t("city_picker_subtitle")}
-          </p>
-        </div>
-
-        {/* 1. State Selector */}
-        <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {/* Step 1: State Selection */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
           <label
-            style={{
-              display: "block",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "#334155",
-              marginBottom: "0.375rem",
-            }}
+            htmlFor="state-selector"
+            style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}
           >
-            {t("select_state")}
+            {t("select_state") || "State"}
           </label>
-          <select
+          <Select
+            id="state-selector"
             value={selectedState}
             onChange={(e) => {
               setSelectedState(e.target.value);
               setSelectedDistrict("");
             }}
-            style={{
-              width: "100%",
-              padding: "0.625rem",
-              borderRadius: "8px",
-              border: "1px solid #cbd5e1",
-              fontSize: "0.95rem",
-            }}
           >
-            <option value="">-- All States --</option>
+            <option value="">All States</option>
             {states.map((s) => (
               <option key={s.code} value={s.code}>
                 {s.name} ({s.code})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
-        {/* 2. District Selector */}
-        <div>
-          <label
-            style={{
-              display: "block",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "#334155",
-              marginBottom: "0.375rem",
-            }}
-          >
-            {t("select_district")}
-          </label>
-          <select
-            value={selectedDistrict}
-            onChange={(e) => setSelectedDistrict(e.target.value)}
-            disabled={!selectedState && availableDistricts.length === 0}
-            style={{
-              width: "100%",
-              padding: "0.625rem",
-              borderRadius: "8px",
-              border: "1px solid #cbd5e1",
-              fontSize: "0.95rem",
-              backgroundColor: !selectedState ? "#f8fafc" : "#ffffff",
-            }}
-          >
-            <option value="">-- All Districts --</option>
-            {availableDistricts.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 3. ULB Search & List */}
-        <div
-          style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, minHeight: 0 }}
-        >
-          <label
-            style={{
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "#334155",
-            }}
-          >
-            {t("select_ulb")}
-          </label>
-          <input
-            type="text"
-            placeholder={t("search_placeholder")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              boxSizing: "border-box",
-              padding: "0.625rem",
-              borderRadius: "8px",
-              border: "1px solid #cbd5e1",
-              fontSize: "0.95rem",
-            }}
-          />
-
-          <div
-            style={{
-              overflowY: "auto",
-              maxHeight: "220px",
-              border: "1px solid #e2e8f0",
-              borderRadius: "8px",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            {filteredUlbs.length === 0 ? (
-              <div style={{ padding: "1rem", color: "#94a3b8", textAlign: "center" }}>
-                No municipality found for selected filter
-              </div>
-            ) : (
-              filteredUlbs.map((ulb) => (
-                <button
-                  key={ulb.id}
-                  onClick={() => handleSelect(ulb)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "0.75rem 1rem",
-                    border: "none",
-                    borderBottom: "1px solid #f1f5f9",
-                    backgroundColor: "transparent",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    transition: "background-color 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "0.95rem" }}>
-                      {ulb.name}
-                    </div>
-                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                      {ulb.district}, {ulb.state_code} • {ulb.ulb_type.replace("_", " ")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: "0.75rem",
-                      padding: "0.25rem 0.5rem",
-                      borderRadius: "6px",
-                      backgroundColor: "#e0e7ff",
-                      color: "#4338ca",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Select
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-
-        {onClose && (
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              onClick={onClose}
-              style={{
-                padding: "0.5rem 1rem",
-                borderRadius: "6px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "#f8fafc",
-                cursor: "pointer",
-              }}
+        {/* Step 2: District Filter */}
+        {availableDistricts.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label
+              htmlFor="district-selector"
+              style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}
             >
-              Cancel
-            </button>
+              District
+            </label>
+            <Select
+              id="district-selector"
+              value={selectedDistrict}
+              onChange={(e) => setSelectedDistrict(e.target.value)}
+            >
+              <option value="">All Districts in {selectedState || "State"}</option>
+              {availableDistricts.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </Select>
           </div>
         )}
+
+        {/* Step 3: ULB Search */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+          <label
+            htmlFor="ulb-search"
+            style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}
+          >
+            Search Urban Local Body (ULB)
+          </label>
+          <div style={{ position: "relative" }}>
+            <TextInput
+              id="ulb-search"
+              placeholder="Search by city, town or corporation name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: "2.25rem" }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: "0.75rem",
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "var(--text-subtle)",
+                pointerEvents: "none",
+                display: "flex",
+                alignItems: "center",
+              }}
+              aria-hidden="true"
+            >
+              <Search size={16} strokeWidth={1.75} />
+            </div>
+          </div>
+        </div>
+
+        {/* ULB Results List */}
+        <div>
+          <div
+            style={{
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              marginBottom: "0.5rem",
+            }}
+          >
+            Available Municipalities ({filteredUlbs.length})
+          </div>
+
+          {loading ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <Skeleton height="56px" />
+              <Skeleton height="56px" />
+            </div>
+          ) : filteredUlbs.length === 0 ? (
+            <EmptyState
+              title="No municipalities found"
+              description="No local body matched your search query in this state/district."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedState("");
+                    setSelectedDistrict("");
+                    setSearchQuery("");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <div
+              role="listbox"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.5rem",
+                maxHeight: "240px",
+                overflowY: "auto",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-md)",
+                padding: "0.5rem",
+                backgroundColor: "var(--surface)",
+              }}
+            >
+              {filteredUlbs.map((t) => (
+                <div
+                  key={t.id || t.slug}
+                  role="option"
+                  aria-selected="false"
+                  tabIndex={0}
+                  onClick={() => handleSelect(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleSelect(t);
+                    }
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "0.625rem 0.75rem",
+                    borderRadius: "var(--r-sm)",
+                    border: "1px solid var(--border)",
+                    backgroundColor: "var(--surface-raised)",
+                    cursor: "pointer",
+                    transition: "background-color var(--dur-fast) var(--ease-out)",
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: "0.9375rem",
+                        fontWeight: 600,
+                        color: "var(--text)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.375rem",
+                      }}
+                    >
+                      <Building2
+                        size={15}
+                        strokeWidth={1.75}
+                        style={{ color: "var(--text-subtle)", flexShrink: 0 }}
+                        aria-hidden={true}
+                      />
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t.name}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                        marginTop: "2px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.25rem",
+                      }}
+                    >
+                      <MapPin size={11} strokeWidth={1.75} aria-hidden={true} />
+                      <span>
+                        {t.district}, {t.state_code}
+                      </span>
+                      <span style={{ color: "var(--border)" }}>•</span>
+                      <span style={{ textTransform: "capitalize" }}>
+                        {t.ulb_type?.replace(/_/g, " ") || "ULB"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    style={{ flexShrink: 0, height: "32px", padding: "0 0.625rem" }}
+                  >
+                    Select
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

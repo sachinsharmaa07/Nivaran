@@ -19,6 +19,29 @@ connectMongo().catch(() => {
 export const app: Express = express();
 
 // Raw-body parser for photo upload endpoint (must come BEFORE express.json)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (
+    origin &&
+    (origin === "http://localhost:5173" ||
+      origin === "http://127.0.0.1:5173" ||
+      origin.startsWith("http://localhost:"))
+  ) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, X-Tenant-Slug, Accept"
+    );
+  }
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use("/api/v1/issues/upload", express.raw({ type: "*/*", limit: "8mb" }));
 app.use(express.json());
 app.use(requestIdMiddleware);

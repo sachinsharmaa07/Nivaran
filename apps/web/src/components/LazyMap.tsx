@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Navigation } from "lucide-react";
 
 export interface Coordinates {
   lat: number;
@@ -26,18 +27,21 @@ export default function LazyMap({
   return (
     <div
       style={{
-        borderRadius: "12px",
+        borderRadius: "var(--r-md)",
         overflow: "hidden",
-        border: "1px solid #cbd5e1",
-        backgroundColor: "#f8fafc",
+        border: "1px solid var(--border)",
+        backgroundColor: "var(--surface-sunken)",
         position: "relative",
       }}
     >
-      {/* Map visual canvas simulation with grid */}
+      {/* Map coordinate simulation canvas */}
       <div
         style={{
-          height: "220px",
-          background: "radial-gradient(circle, #e0f2fe 10%, #bae6fd 90%)",
+          height: "200px",
+          backgroundColor: "var(--surface-sunken)",
+          backgroundImage:
+            "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -45,49 +49,38 @@ export default function LazyMap({
           position: "relative",
         }}
       >
-        {/* Service Area circle illustration */}
+        {/* Service geofence boundary outline */}
         <div
           style={{
             position: "absolute",
-            width: "180px",
-            height: "180px",
+            width: "160px",
+            height: "160px",
             borderRadius: "50%",
-            border: "2px dashed #0284c7",
-            backgroundColor: "rgba(14, 165, 233, 0.15)",
+            border: "2px dashed var(--asphalt-500)",
             pointerEvents: "none",
           }}
+          aria-hidden="true"
         />
 
-        {/* Pin marker */}
+        {/* Pin marker: 220ms drop fade motion per DESIGN.md §3 */}
         <div
           style={{
             zIndex: 10,
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            animation: "bounce 1s infinite alternate",
           }}
+          aria-hidden="true"
         >
           <div
             style={{
-              backgroundColor: "#ef4444",
-              color: "#ffffff",
-              padding: "0.25rem 0.5rem",
-              borderRadius: "4px",
-              fontSize: "0.75rem",
-              fontWeight: 700,
-              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.2)",
-            }}
-          >
-            Issue Location
-          </div>
-          <div
-            style={{
-              width: 0,
-              height: 0,
-              borderLeft: "6px solid transparent",
-              borderRight: "6px solid transparent",
-              borderTop: "8px solid #ef4444",
+              width: "24px",
+              height: "24px",
+              borderRadius: "50% 50% 50% 0",
+              transform: "rotate(-45deg)",
+              backgroundColor: "var(--kerb-500)",
+              border: "2px solid #ffffff",
+              boxShadow: "0 2px 6px rgba(14,17,16,0.25)",
             }}
           />
         </div>
@@ -97,59 +90,119 @@ export default function LazyMap({
             position: "absolute",
             bottom: "8px",
             left: "8px",
-            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            backgroundColor: "var(--surface-raised)",
             padding: "0.25rem 0.5rem",
-            borderRadius: "6px",
+            borderRadius: "var(--r-sm)",
             fontSize: "0.75rem",
-            color: "#0369a1",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            fontVariantNumeric: "tabular-nums",
             fontWeight: 600,
           }}
         >
-          📍 {coords.lat.toFixed(4)}° N, {coords.lon.toFixed(4)}° E (Service Area OK)
+          {coords.lat.toFixed(5)}, {coords.lon.toFixed(5)}
         </div>
       </div>
 
-      {/* Location nudge controls */}
+      {/* Manual nudge controls */}
       <div
         style={{
+          padding: "0.625rem 0.75rem",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "0.5rem 0.75rem",
-          backgroundColor: "#ffffff",
-          borderTop: "1px solid #e2e8f0",
-          fontSize: "0.8rem",
+          backgroundColor: "var(--surface)",
+          borderTop: "1px solid var(--border)",
+          fontSize: "0.8125rem",
         }}
       >
-        <span style={{ color: "#64748b" }}>Adjust coordinates slightly:</span>
-        <div style={{ display: "flex", gap: "0.25rem" }}>
+        <span
+          style={{
+            color: "var(--text-muted)",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.375rem",
+          }}
+        >
+          <Navigation size={13} strokeWidth={1.75} aria-hidden={true} />
+          <span>Adjust marker</span>
+        </span>
+        <div style={{ display: "flex", gap: "0.375rem" }}>
           <button
             type="button"
-            onClick={() => handleAdjust(0.001, 0)}
-            style={{ padding: "0.25rem 0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+            onClick={() => handleAdjust(0.0005, 0)}
+            className="touch-target"
+            style={{
+              padding: "0 0.5rem",
+              height: "32px",
+              minHeight: "32px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-sm)",
+              backgroundColor: "var(--surface-raised)",
+              color: "var(--text)",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
-            ↑ North
+            North
           </button>
           <button
             type="button"
-            onClick={() => handleAdjust(-0.001, 0)}
-            style={{ padding: "0.25rem 0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+            onClick={() => handleAdjust(-0.0005, 0)}
+            className="touch-target"
+            style={{
+              padding: "0 0.5rem",
+              height: "32px",
+              minHeight: "32px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-sm)",
+              backgroundColor: "var(--surface-raised)",
+              color: "var(--text)",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
-            ↓ South
+            South
           </button>
           <button
             type="button"
-            onClick={() => handleAdjust(0, -0.001)}
-            style={{ padding: "0.25rem 0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+            onClick={() => handleAdjust(0, -0.0005)}
+            className="touch-target"
+            style={{
+              padding: "0 0.5rem",
+              height: "32px",
+              minHeight: "32px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-sm)",
+              backgroundColor: "var(--surface-raised)",
+              color: "var(--text)",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
-            ← West
+            West
           </button>
           <button
             type="button"
-            onClick={() => handleAdjust(0, 0.001)}
-            style={{ padding: "0.25rem 0.5rem", borderRadius: "4px", border: "1px solid #cbd5e1" }}
+            onClick={() => handleAdjust(0, 0.0005)}
+            className="touch-target"
+            style={{
+              padding: "0 0.5rem",
+              height: "32px",
+              minHeight: "32px",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-sm)",
+              backgroundColor: "var(--surface-raised)",
+              color: "var(--text)",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
-            → East
+            East
           </button>
         </div>
       </div>

@@ -70,6 +70,50 @@ export class IssueRepo {
     return Issue.findOne({ tenantId: this.tenantId, _id: id });
   }
 
+  async list(filters: {
+    status?: string | string[] | undefined;
+    departmentId?: string | undefined;
+    wardId?: string | undefined;
+    reporterId?: string | undefined;
+    search?: string | undefined;
+    limit?: number | undefined;
+    skip?: number | undefined;
+  }): Promise<IIssue[]> {
+    await connectMongo();
+    const query: Record<string, unknown> = { tenantId: this.tenantId };
+    if (filters.status) {
+      if (Array.isArray(filters.status)) {
+        query["status"] = { $in: filters.status };
+      } else {
+        query["status"] = filters.status;
+      }
+    }
+    if (filters.departmentId) {
+      query["department.id"] = filters.departmentId;
+    }
+    if (filters.wardId) {
+      query["location.wardId"] = filters.wardId;
+    }
+    if (filters.reporterId) {
+      query["$or"] = [{ reporterId: filters.reporterId }, { reporterIds: filters.reporterId }];
+    }
+    if (filters.search) {
+      const s = filters.search.trim();
+      const regex = new RegExp(s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&"), "i");
+      query["$or"] = [
+        { publicId: regex },
+        { description: regex },
+        { landmark: regex },
+        { "category.code": regex },
+      ];
+    }
+    return (await Issue.find(query)
+      .sort({ "priority.override.score": -1, "priority.breakdown.score": -1, createdAt: -1 })
+      .skip(filters.skip ?? 0)
+      .limit(filters.limit ?? 100)
+      .lean()) as unknown as IIssue[];
+  }
+
   async update(publicId: string, update: Partial<IIssue>, session?: Sess): Promise<IIssue | null> {
     return Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId },

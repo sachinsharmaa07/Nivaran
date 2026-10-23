@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "../utils/i18n.js";
+import { Select, Skeleton, EmptyState } from "../ui/index.js";
 
 interface UlbSummaryItem {
   tenant_id: string;
@@ -36,12 +37,12 @@ export function StateSummary({ stateCode = "PB" }: { stateCode?: string }): Reac
 
   return (
     <div
+      className="card-container"
       style={{
-        backgroundColor: "#ffffff",
-        borderRadius: "16px",
-        border: "1px solid #e2e8f0",
-        padding: "1.5rem",
-        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+        backgroundColor: "var(--surface)",
+        borderRadius: "var(--r-lg)",
+        border: "1px solid var(--border)",
+        padding: "1.25rem",
       }}
     >
       <div
@@ -49,98 +50,116 @@ export function StateSummary({ stateCode = "PB" }: { stateCode?: string }): Reac
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          gap: "1rem",
           marginBottom: "1rem",
+          flexWrap: "wrap",
         }}
       >
         <div>
-          <h3 style={{ margin: "0 0 0.25rem 0", color: "#0f172a" }}>{t("state_summary")}</h3>
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "#64748b" }}>
-            {t("privacy_masked_note")}
+          <h2 style={{ margin: "0 0 0.25rem 0", fontSize: "1.25rem", color: "var(--text)" }}>
+            {t("state_summary") || "State Civic Health Summary"}
+          </h2>
+          <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+            {t("privacy_masked_note") || "Counts under 5 are masked for citizen privacy"}
           </p>
         </div>
 
-        <select
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          style={{
-            padding: "0.5rem 0.75rem",
-            borderRadius: "8px",
-            border: "1px solid #cbd5e1",
-            fontWeight: 600,
-          }}
-        >
-          <option value="PB">Punjab (PB)</option>
-          <option value="MH">Maharashtra (MH)</option>
-          <option value="TN">Tamil Nadu (TN)</option>
-        </select>
+        <div style={{ minWidth: "160px" }}>
+          <Select value={code} onChange={(e) => setCode(e.target.value)}>
+            <option value="PB">Punjab (PB)</option>
+            <option value="MH">Maharashtra (MH)</option>
+            <option value="TN">Tamil Nadu (TN)</option>
+          </Select>
+        </div>
       </div>
 
       {loading ? (
-        <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8" }}>
-          Loading civic metrics...
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <Skeleton height="44px" />
+          <Skeleton height="44px" />
+          <Skeleton height="44px" />
         </div>
       ) : data.length === 0 ? (
-        <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8" }}>
-          No ULBs found for state {code}
-        </div>
+        <EmptyState
+          title={`No metrics for state ${code}`}
+          description="Municipality aggregate performance data has not yet been ingested for this region."
+        />
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: "0.875rem",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             <thead>
-              <tr style={{ backgroundColor: "#f8fafc", textAlign: "left" }}>
-                <th style={{ padding: "0.75rem 1rem", borderBottom: "1px solid #e2e8f0" }}>
-                  Municipality
-                </th>
-                <th style={{ padding: "0.75rem 1rem", borderBottom: "1px solid #e2e8f0" }}>
-                  District
-                </th>
-                <th style={{ padding: "0.75rem 1rem", borderBottom: "1px solid #e2e8f0" }}>
-                  Open Issues
-                </th>
-                <th style={{ padding: "0.75rem 1rem", borderBottom: "1px solid #e2e8f0" }}>
-                  SLA Compliance
-                </th>
-                <th style={{ padding: "0.75rem 1rem", borderBottom: "1px solid #e2e8f0" }}>
-                  Median Resolution
-                </th>
+              <tr
+                style={{
+                  backgroundColor: "var(--surface-sunken)",
+                  textAlign: "left",
+                  borderBottom: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                  fontSize: "0.75rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                <th style={{ padding: "0.625rem 0.75rem" }}>Municipality</th>
+                <th style={{ padding: "0.625rem 0.75rem" }}>District</th>
+                <th style={{ padding: "0.625rem 0.75rem" }}>Open Issues</th>
+                <th style={{ padding: "0.625rem 0.75rem" }}>SLA Compliance</th>
+                <th style={{ padding: "0.625rem 0.75rem" }}>Median Resolution</th>
               </tr>
             </thead>
             <tbody>
               {data.map((item) => (
-                <tr key={item.tenant_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td style={{ padding: "0.75rem 1rem", fontWeight: 600, color: "#1e293b" }}>
+                <tr
+                  key={item.tenant_id}
+                  style={{
+                    borderBottom: "1px solid var(--border)",
+                    color: "var(--text)",
+                  }}
+                >
+                  <td style={{ padding: "0.625rem 0.75rem", fontWeight: 600 }}>
                     {item.tenant_name}
                   </td>
-                  <td style={{ padding: "0.75rem 1rem", color: "#64748b" }}>{item.district}</td>
-                  <td style={{ padding: "0.75rem 1rem" }}>
+                  <td style={{ padding: "0.625rem 0.75rem", color: "var(--text-muted)" }}>
+                    {item.district}
+                  </td>
+                  <td style={{ padding: "0.625rem 0.75rem" }}>
                     {item.masked ? (
-                      <span style={{ color: "#94a3b8", fontStyle: "italic" }}>
-                        — (&lt;10 issues)
+                      <span style={{ color: "var(--text-subtle)", fontStyle: "italic" }}>
+                        &lt; 5 (masked)
                       </span>
                     ) : (
-                      <span style={{ fontWeight: 600, color: "#2563eb" }}>{item.open_count}</span>
+                      (item.open_count ?? "0")
                     )}
                   </td>
-                  <td style={{ padding: "0.75rem 1rem" }}>
-                    {item.masked ? (
-                      <span style={{ color: "#94a3b8", fontStyle: "italic" }}>—</span>
+                  <td style={{ padding: "0.625rem 0.75rem" }}>
+                    {item.masked || item.sla_compliance_pct === null ? (
+                      <span style={{ color: "var(--text-subtle)" }}>—</span>
                     ) : (
                       <span
                         style={{
+                          color:
+                            item.sla_compliance_pct >= 85
+                              ? "var(--sign-600)"
+                              : item.sla_compliance_pct >= 70
+                                ? "var(--paint-600)"
+                                : "var(--kerb-600)",
                           fontWeight: 600,
-                          color: (item.sla_compliance_pct ?? 0) >= 80 ? "#16a34a" : "#ca8a04",
                         }}
                       >
                         {item.sla_compliance_pct}%
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: "0.75rem 1rem" }}>
-                    {item.masked ? (
-                      <span style={{ color: "#94a3b8", fontStyle: "italic" }}>—</span>
-                    ) : (
-                      <span>{item.median_resolution_hours} hrs</span>
-                    )}
+                  <td style={{ padding: "0.625rem 0.75rem" }}>
+                    {item.masked || item.median_resolution_hours === null
+                      ? "—"
+                      : `${item.median_resolution_hours} hours`}
                   </td>
                 </tr>
               ))}

@@ -1,0 +1,460 @@
+@layer reset, tokens, base, components, utilities;
+
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body {
+    min-height: 100dvh;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  img,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* Asphalt: neutral, faint green-grey tint */
+    --asphalt-0: #ffffff;
+    --asphalt-50: #f6f8f7;
+    --asphalt-100: #ecefee;
+    --asphalt-200: #dce1df;
+    --asphalt-300: #c3cac7;
+    --asphalt-400: #97a19d;
+    --asphalt-500: #6c7772;
+    --asphalt-600: #4f5954;
+    --asphalt-700: #39423e;
+    --asphalt-800: #252c29;
+    --asphalt-900: #171b1a;
+    --asphalt-950: #0e1110;
+
+    /* Paint yellow: primary call to action, "work in progress" */
+    --paint-50: #fff9db;
+    --paint-100: #fff0a3;
+    --paint-200: #fbe26b;
+    --paint-300: #f7d13e;
+    --paint-400: #f2c21b;
+    --paint-500: #d9a800;
+    --paint-600: #a87f00;
+    --paint-700: #765900;
+
+    /* Signage green: resolved, success */
+    --sign-50: #e8f5ee;
+    --sign-100: #c6e6d6;
+    --sign-300: #6cc29a;
+    --sign-500: #1e9460;
+    --sign-600: #167a4e;
+    --sign-700: #0f5e3e;
+    --sign-800: #0b4a32;
+
+    /* Water blue: information, links, assigned */
+    --water-50: #e8f1f8;
+    --water-100: #c7ddee;
+    --water-300: #7fb2d8;
+    --water-500: #2a78b5;
+    --water-600: #1d6196;
+    --water-700: #154a75;
+
+    /* Kerb red: critical, danger, reopened */
+    --kerb-50: #fdecea;
+    --kerb-100: #f9cfca;
+    --kerb-300: #ee8a82;
+    --kerb-500: #d13f34;
+    --kerb-600: #b3322a;
+    --kerb-700: #8e2620;
+
+    /* Signal orange: high priority, warning */
+    --signal-50: #fff1e3;
+    --signal-100: #ffd9b3;
+    --signal-300: #f5a55c;
+    --signal-500: #e8761a;
+    --signal-600: #bf5b0a;
+    --signal-700: #8f4306;
+
+    /* Semantic tokens using light-dark() */
+    --bg: light-dark(var(--asphalt-50), var(--asphalt-950));
+    --surface: light-dark(var(--asphalt-0), var(--asphalt-900));
+    --surface-sunken: light-dark(var(--asphalt-100), var(--asphalt-950));
+    --surface-raised: light-dark(var(--asphalt-0), var(--asphalt-800));
+    --text: light-dark(var(--asphalt-900), var(--asphalt-100));
+    --text-muted: light-dark(var(--asphalt-600), var(--asphalt-300));
+    --text-subtle: light-dark(var(--asphalt-500), var(--asphalt-400));
+    --border: light-dark(var(--asphalt-200), var(--asphalt-700));
+    --border-control: var(--asphalt-500);
+    --primary: light-dark(var(--asphalt-900), var(--asphalt-100));
+    --on-primary: light-dark(var(--asphalt-0), var(--asphalt-900));
+    --cta: var(--paint-400);
+    --on-cta: var(--asphalt-900);
+    --link: light-dark(var(--water-600), var(--water-300));
+    --focus-inner: light-dark(var(--asphalt-900), var(--asphalt-100));
+    --focus-outer: var(--paint-400);
+
+    /* Radius hierarchy */
+    --r-sm: 4px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-sheet: 16px;
+
+    /* Elevation: only for overlays (menus, dialogs, toasts) */
+    --shadow-overlay: 0 8px 24px rgba(14, 17, 16, 0.18), 0 2px 6px rgba(14, 17, 16, 0.12);
+
+    /* Motion tokens */
+    --dur-instant: 80ms;
+    --dur-fast: 140ms;
+    --dur-base: 220ms;
+    --dur-slow: 360ms;
+    --dur-draw: 560ms;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+    /* Typography */
+    --font-display: "Barlow Semi Condensed", "Public Sans", sans-serif;
+    --font-body: "Public Sans", "Noto Sans Devanagari", "Noto Sans Gurmukhi", system-ui, sans-serif;
+
+    /* Spacing 4px scale */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+    --sp-12: 48px;
+    --sp-16: 64px;
+
+    /* Tonal status chip / badge color-mix tints */
+    --chip-bg-asphalt: light-dark(
+      var(--asphalt-100),
+      color-mix(in srgb, var(--asphalt-700) 35%, var(--surface))
+    );
+    --chip-text-asphalt: light-dark(var(--asphalt-700), var(--asphalt-100));
+    --chip-border-asphalt: light-dark(
+      var(--asphalt-300),
+      color-mix(in srgb, var(--asphalt-500) 60%, transparent)
+    );
+
+    --chip-bg-water: light-dark(
+      var(--water-100),
+      color-mix(in srgb, var(--water-700) 35%, var(--surface))
+    );
+    --chip-text-water: light-dark(var(--water-700), var(--water-100));
+    --chip-border-water: light-dark(
+      var(--water-300),
+      color-mix(in srgb, var(--water-500) 60%, transparent)
+    );
+
+    --chip-bg-paint: light-dark(
+      var(--paint-100),
+      color-mix(in srgb, var(--paint-700) 35%, var(--surface))
+    );
+    --chip-text-paint: light-dark(var(--paint-700), var(--paint-100));
+    --chip-border-paint: light-dark(
+      var(--paint-300),
+      color-mix(in srgb, var(--paint-500) 60%, transparent)
+    );
+
+    --chip-bg-sign: light-dark(
+      var(--sign-100),
+      color-mix(in srgb, var(--sign-700) 35%, var(--surface))
+    );
+    --chip-text-sign: light-dark(var(--sign-700), var(--sign-100));
+    --chip-border-sign: light-dark(
+      var(--sign-300),
+      color-mix(in srgb, var(--sign-500) 60%, transparent)
+    );
+
+    --chip-bg-kerb: light-dark(
+      var(--kerb-100),
+      color-mix(in srgb, var(--kerb-700) 35%, var(--surface))
+    );
+    --chip-text-kerb: light-dark(var(--kerb-700), var(--kerb-100));
+    --chip-border-kerb: light-dark(
+      var(--kerb-300),
+      color-mix(in srgb, var(--kerb-500) 60%, transparent)
+    );
+
+    --chip-bg-signal: light-dark(
+      var(--signal-100),
+      color-mix(in srgb, var(--signal-700) 35%, var(--surface))
+    );
+    --chip-text-signal: light-dark(var(--signal-700), var(--signal-100));
+    --chip-border-signal: light-dark(
+      var(--signal-300),
+      color-mix(in srgb, var(--signal-500) 60%, transparent)
+    );
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: var(--asphalt-950);
+      --surface: var(--asphalt-900);
+      --surface-sunken: var(--asphalt-950);
+      --surface-raised: var(--asphalt-800);
+      --text: var(--asphalt-100);
+      --text-muted: var(--asphalt-300);
+      --text-subtle: var(--asphalt-400);
+      --border: var(--asphalt-700);
+      --border-control: var(--asphalt-500);
+      --primary: var(--asphalt-100);
+      --on-primary: var(--asphalt-900);
+      --cta: var(--paint-400);
+      --on-cta: var(--asphalt-900);
+      --link: var(--water-300);
+      --focus-inner: var(--asphalt-100);
+      --focus-outer: var(--paint-400);
+    }
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: clamp(0.9375rem, 0.9rem + 0.2vw, 1rem);
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  h1 {
+    font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2rem);
+    line-height: 1.2;
+  }
+
+  h2 {
+    font-size: clamp(1.25rem, 1.1rem + 0.8vw, 1.5rem);
+    line-height: 1.25;
+  }
+
+  h3 {
+    font-size: clamp(1.1rem, 1rem + 0.4vw, 1.25rem);
+    line-height: 1.3;
+  }
+
+  :lang(hi),
+  :lang(pa) {
+    line-height: 1.6;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-inner);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--focus-outer);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    .lane-line-loader,
+    .lane-travel {
+      animation: none !important;
+    }
+  }
+}
+
+@layer components {
+  /* Sign plate: panel with 2px inset border line */
+  .sign-plate {
+    background-color: var(--surface);
+    border-radius: var(--r-lg);
+    border: 1px solid var(--border);
+    outline: 2px solid var(--border);
+    outline-offset: -6px;
+    padding: var(--sp-4);
+  }
+
+  /* Hazard stripe for SLA breaches */
+  .hazard-stripe-top {
+    position: relative;
+    &::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: repeating-linear-gradient(
+        -45deg,
+        var(--paint-400),
+        var(--paint-400) 8px,
+        var(--asphalt-900) 8px,
+        var(--asphalt-900) 16px
+      );
+      border-top-left-radius: inherit;
+      border-top-right-radius: inherit;
+    }
+  }
+
+  /* Lane line animations */
+  @keyframes laneLineDash {
+    0% {
+      stroke-dashoffset: 24;
+    }
+    100% {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  .lane-line-loader {
+    stroke-dasharray: 8 4;
+    animation: laneLineDash 1.2s linear infinite;
+  }
+
+  /* Native dialog styling with @starting-style */
+  dialog {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background-color: var(--surface-raised);
+    color: var(--text);
+    box-shadow: var(--shadow-overlay);
+    padding: var(--sp-6);
+    max-width: min(92vw, 560px);
+    margin: auto;
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      opacity var(--dur-base) var(--ease-out),
+      display var(--dur-base) allow-discrete,
+      overlay var(--dur-base) allow-discrete;
+
+    &::backdrop {
+      background-color: rgba(14, 17, 16, 0.6);
+      transition:
+        opacity var(--dur-base) var(--ease-out),
+        display var(--dur-base) allow-discrete,
+        overlay var(--dur-base) allow-discrete;
+    }
+
+    @starting-style {
+      &[open] {
+        opacity: 0;
+        transform: scale(0.98);
+      }
+      &[open]::backdrop {
+        opacity: 0;
+      }
+    }
+  }
+
+  /* Toast entry animation with @starting-style */
+  .toast-item {
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      opacity var(--dur-base) var(--ease-out);
+
+    @starting-style {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  /* Route change view transition per DESIGN.md §3 */
+  @view-transition {
+    navigation: auto;
+  }
+
+  ::view-transition-old(root) {
+    animation: var(--dur-fast) var(--ease-out) both fadeOut;
+  }
+  ::view-transition-new(root) {
+    animation: var(--dur-fast) var(--ease-out) both fadeIn;
+  }
+
+  @keyframes fadeOut {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Container query setup */
+  .card-container {
+    container-type: inline-size;
+  }
+
+  /* Forms :has() validation state styling */
+  .form-field:has(input:invalid:not(:placeholder-shown)),
+  .form-field:has(textarea:invalid:not(:placeholder-shown)) {
+    --field-border: var(--kerb-500);
+  }
+}
+
+@layer utilities {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -526,14 +526,100 @@ issuesRouter.post("/:publicId/override-priority", async (req: Request, res: Resp
   });
 });
 
+// ── GET /api/v1/issues — Query issues for staff queue or citizen map ─────────
+
+issuesRouter.get("/", async (req: Request, res: Response) => {
+  const tenantSlug =
+    (req.query["tenant_slug"] as string) || (req.headers["x-tenant-slug"] as string);
+  let tenantId = req.user?.tid;
+  if (!tenantId && tenantSlug) {
+    const t = await platformDb.getTenantBySlug(tenantSlug);
+    if (t) tenantId = t.id;
+  }
+  if (!tenantId) {
+    throw new AppError("UNAUTHORIZED", "Tenant identifier is required to list issues", 401);
+  }
+
+  const repo = new IssueRepo(tenantId);
+  const statusParam = req.query["status"] as string | undefined;
+  const status = statusParam ? statusParam.split(",") : undefined;
+  const departmentId = req.query["department_id"] as string | undefined;
+  const wardId = req.query["ward_id"] as string | undefined;
+  let reporterId = req.query["reporter_id"] as string | undefined;
+  if (reporterId === "me" && req.user?.sub) {
+    reporterId = req.user.sub;
+  }
+  const search = req.query["search"] as string | undefined;
+  const limit = req.query["limit"] ? parseInt(req.query["limit"] as string, 10) : 100;
+
+  const issues = await repo.list({
+    status,
+    departmentId,
+    wardId,
+    reporterId,
+    search,
+    limit,
+  });
+
+  res.status(200).json({ data: issues });
+});
+
+// ── GET /api/v1/issues/:publicId — Get issue detail ──────────────────────────
+
+issuesRouter.get("/:publicId", async (req: Request, res: Response) => {
+  const publicId = req.params["publicId"] as string;
+  if (!publicId) throw new AppError("BAD_REQUEST", "publicId is required", 400);
+
+  const tenantSlug =
+    (req.query["tenant_slug"] as string) || (req.headers["x-tenant-slug"] as string);
+  let tenantId = req.user?.tid;
+  if (!tenantId && tenantSlug) {
+    const t = await platformDb.getTenantBySlug(tenantSlug);
+    if (t) tenantId = t.id;
+  }
+  if (!tenantId) {
+    const match = /^NVR-([A-Z0-9]+)-\d+$/.exec(publicId);
+    if (match?.[1]) {
+      const code = match[1];
+      const tenants = await platformDb.listTenants();
+      const found = tenants.find((x) => x.code === code);
+      if (found) tenantId = found.id;
+    }
+  }
+  if (!tenantId) {
+    throw new AppError("UNAUTHORIZED", "Tenant identification required", 401);
+  }
+
+  const repo = new IssueRepo(tenantId);
+  const issue = await repo.findByPublicId(publicId);
+  if (!issue) throw new AppError("NOT_FOUND", `Issue '${publicId}' not found`, 404);
+
+  res.status(200).json({ data: issue });
+});
+
 // ── GET /api/v1/issues/:publicId/audit — Audit trail ────────────────────────
 
 issuesRouter.get("/:publicId/audit", async (req: Request, res: Response) => {
   const publicId = req.params["publicId"] as string;
   if (!publicId) throw new AppError("BAD_REQUEST", "publicId is required", 400);
 
-  const tenantId = req.user?.tid;
-  if (!tenantId) throw new AppError("UNAUTHORIZED", "Authentication required", 401);
+  const tenantSlug =
+    (req.query["tenant_slug"] as string) || (req.headers["x-tenant-slug"] as string);
+  let tenantId = req.user?.tid;
+  if (!tenantId && tenantSlug) {
+    const t = await platformDb.getTenantBySlug(tenantSlug);
+    if (t) tenantId = t.id;
+  }
+  if (!tenantId) {
+    const match = /^NVR-([A-Z0-9]+)-\d+$/.exec(publicId);
+    if (match?.[1]) {
+      const code = match[1];
+      const tenants = await platformDb.listTenants();
+      const found = tenants.find((x) => x.code === code);
+      if (found) tenantId = found.id;
+    }
+  }
+  if (!tenantId) throw new AppError("UNAUTHORIZED", "Tenant identification required", 401);
 
   const repo = new IssueRepo(tenantId);
   const issue = await repo.findByPublicId(publicId);
