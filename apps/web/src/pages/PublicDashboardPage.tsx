@@ -111,7 +111,12 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
       const res = await fetch(`/api/v1/public/${tenant.slug}/categories`);
       if (res.ok) {
         const json = await res.json();
-        setCategories(json.data || []);
+        const list = Array.isArray(json.data)
+          ? json.data
+          : Array.isArray(json.data?.categories)
+            ? json.data.categories
+            : [];
+        setCategories(list);
       }
     } catch {
       // Keep empty if failed

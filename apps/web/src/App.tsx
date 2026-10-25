@@ -51,6 +51,47 @@ const queryClient = new QueryClient({
   },
 });
 
+class RouteErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("RouteErrorBoundary caught error:", error, errorInfo);
+  }
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: "2rem", maxWidth: "800px", margin: "2rem auto" }}>
+          <h2 style={{ color: "var(--kerb-600)", marginBottom: "1rem" }}>
+            Application Error Caught
+          </h2>
+          <div
+            style={{
+              padding: "1rem",
+              borderRadius: "var(--r-md)",
+              backgroundColor: "var(--surface-sunken)",
+              border: "1px solid var(--border)",
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.875rem",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {this.state.error?.stack || this.state.error?.message || "Unknown error"}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function App(): JSX.Element {
   const [tenant, setTenant] = useState<TenantInfo>(() => {
     if (typeof window !== "undefined") {
@@ -95,102 +136,110 @@ export function App(): JSX.Element {
                 onOpenCityPicker={() => setCityPickerOpen(true)}
                 onOpenAuth={() => setAuthModalOpen(true)}
               >
-                <Suspense
-                  fallback={
-                    <div
-                      style={{
-                        padding: "3rem 1rem",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "0.75rem",
-                      }}
-                    >
-                      <span style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
-                        Loading page...
-                      </span>
-                      <LaneLineLoader width="120px" />
-                    </div>
-                  }
-                >
-                  <Routes>
-                    {/* 1. Citizen Map Home with pins and bottom sheet */}
-                    <Route
-                      path="/"
-                      element={
-                        <CitizenHomePage
-                          tenant={tenant}
-                          onOpenAuth={() => setAuthModalOpen(true)}
-                        />
-                      }
-                    />
+                <RouteErrorBoundary>
+                  <Suspense
+                    fallback={
+                      <div
+                        style={{
+                          padding: "3rem 1rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "0.75rem",
+                        }}
+                      >
+                        <span style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+                          Loading page...
+                        </span>
+                        <LaneLineLoader width="120px" />
+                      </div>
+                    }
+                  >
+                    <Routes>
+                      {/* 1. Citizen Map Home with pins and bottom sheet */}
+                      <Route
+                        path="/"
+                        element={
+                          <CitizenHomePage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                          />
+                        }
+                      />
 
-                    {/* 2. My Reports */}
-                    <Route
-                      path="/my-reports"
-                      element={
-                        <MyReportsPage tenant={tenant} onOpenAuth={() => setAuthModalOpen(true)} />
-                      }
-                    />
-                    <Route
-                      path="/reports"
-                      element={
-                        <MyReportsPage tenant={tenant} onOpenAuth={() => setAuthModalOpen(true)} />
-                      }
-                    />
+                      {/* 2. My Reports */}
+                      <Route
+                        path="/my-reports"
+                        element={
+                          <MyReportsPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                          />
+                        }
+                      />
+                      <Route
+                        path="/reports"
+                        element={
+                          <MyReportsPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                          />
+                        }
+                      />
 
-                    {/* 3. Issue Detail Page with Lane-line timeline */}
-                    <Route path="/issues/:publicId" element={<IssueDetailPage />} />
+                      {/* 3. Issue Detail Page with Lane-line timeline */}
+                      <Route path="/issues/:publicId" element={<IssueDetailPage />} />
 
-                    {/* 4. Staff Workbench Queue */}
-                    <Route path="/staff/*" element={<StaffQueuePage tenant={tenant} />} />
-                    <Route path="/queue" element={<StaffQueuePage tenant={tenant} />} />
+                      {/* 4. Staff Workbench Queue */}
+                      <Route path="/staff/*" element={<StaffQueuePage tenant={tenant} />} />
+                      <Route path="/queue" element={<StaffQueuePage tenant={tenant} />} />
 
-                    {/* 5. Tenant Admin Configuration */}
-                    <Route path="/admin/*" element={<AdminConfigPage tenant={tenant} />} />
+                      {/* 5. Tenant Admin Configuration */}
+                      <Route path="/admin/*" element={<AdminConfigPage tenant={tenant} />} />
 
-                    {/* 6. Public Civic Performance Dashboard */}
-                    <Route path="/dashboard" element={<PublicDashboardPage tenant={tenant} />} />
-                    <Route
-                      path="/:tenantSlug/dashboard"
-                      element={<PublicDashboardPage tenant={tenant} />}
-                    />
+                      {/* 6. Public Civic Performance Dashboard */}
+                      <Route path="/dashboard" element={<PublicDashboardPage tenant={tenant} />} />
+                      <Route
+                        path="/:tenantSlug/dashboard"
+                        element={<PublicDashboardPage tenant={tenant} />}
+                      />
 
-                    {/* 7. Friendly OAuth Error Page */}
-                    <Route path="/auth/error" element={<AuthErrorPage />} />
+                      {/* 7. Friendly OAuth Error Page */}
+                      <Route path="/auth/error" element={<AuthErrorPage />} />
 
-                    {/* 404 Not Found Page */}
-                    <Route
-                      path="*"
-                      element={
-                        <div style={{ padding: "4rem 1.5rem", textAlign: "center" }}>
-                          <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
-                            404 — Page Not Found
-                          </h1>
-                          <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>
-                            The page you requested does not exist or has been moved.
-                          </p>
-                          <Link
-                            to="/"
-                            style={{
-                              display: "inline-flex",
-                              padding: "0.625rem 1.25rem",
-                              borderRadius: "var(--r-md)",
-                              backgroundColor: "var(--primary)",
-                              color: "var(--on-primary)",
-                              textDecoration: "none",
-                              fontWeight: 600,
-                              fontSize: "0.875rem",
-                            }}
-                          >
-                            Return to Issue Map
-                          </Link>
-                        </div>
-                      }
-                    />
-                  </Routes>
-                </Suspense>
+                      {/* 404 Not Found Page */}
+                      <Route
+                        path="*"
+                        element={
+                          <div style={{ padding: "4rem 1.5rem", textAlign: "center" }}>
+                            <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
+                              404 — Page Not Found
+                            </h1>
+                            <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>
+                              The page you requested does not exist or has been moved.
+                            </p>
+                            <Link
+                              to="/"
+                              style={{
+                                display: "inline-flex",
+                                padding: "0.625rem 1.25rem",
+                                borderRadius: "var(--r-md)",
+                                backgroundColor: "var(--primary)",
+                                color: "var(--on-primary)",
+                                textDecoration: "none",
+                                fontWeight: 600,
+                                fontSize: "0.875rem",
+                              }}
+                            >
+                              Return to Issue Map
+                            </Link>
+                          </div>
+                        }
+                      />
+                    </Routes>
+                  </Suspense>
+                </RouteErrorBoundary>
 
                 {/* Modals */}
                 <CityPicker
