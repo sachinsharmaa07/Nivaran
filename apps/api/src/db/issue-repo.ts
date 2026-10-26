@@ -8,6 +8,7 @@ import { Issue, type IIssue } from "./models/issue.model.js";
 import { AuditEvent, type IAuditEvent } from "./models/audit-event.model.js";
 import { Counter } from "./models/counter.model.js";
 import { connectMongo } from "./mongo.js";
+import { recomputePriorityForIssue } from "../services/rescoring.js";
 
 export interface DuplicateCandidate {
   issue: IIssue;
@@ -154,11 +155,23 @@ export class IssueRepo {
   // ── Reporter management ──────────────────────────────────────────────────────
 
   async addReporter(publicId: string, userId: string, session?: Sess): Promise<IIssue | null> {
-    return Issue.findOneAndUpdate(
+    const updated = await Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId, reporterIds: { $ne: userId } },
       { $addToSet: { reporterIds: userId }, $inc: { version: 1 } },
       { new: true, ...sess(session) }
     ).exec();
+
+    if (updated) {
+      const breakdown = recomputePriorityForIssue(updated);
+      await Issue.updateOne(
+        { tenantId: this.tenantId, publicId },
+        { $set: { "priority.breakdown": breakdown } },
+        session ? { session } : {}
+      );
+      updated.priority = { ...updated.priority, breakdown };
+    }
+
+    return updated;
   }
 
   // ── Status transition ────────────────────────────────────────────────────────
@@ -173,11 +186,23 @@ export class IssueRepo {
     if (newStatus === "reopened") {
       inc["reopenCount"] = 1;
     }
-    return Issue.findOneAndUpdate(
+    const updated = await Issue.findOneAndUpdate(
       { tenantId: this.tenantId, publicId },
       { $set: { status: newStatus, ...extra }, $inc: inc },
       { new: true, ...sess(session) }
     ).exec();
+
+    if (updated) {
+      const breakdown = recomputePriorityForIssue(updated);
+      await Issue.updateOne(
+        { tenantId: this.tenantId, publicId },
+        { $set: { "priority.breakdown": breakdown } },
+        session ? { session } : {}
+      );
+      updated.priority = { ...updated.priority, breakdown };
+    }
+
+    return updated;
   }
 
   async routeDepartment(
@@ -213,7 +238,7 @@ export class IssueRepo {
     }).session(session ?? null);
 
     if (secondary) {
-      await Issue.findOneAndUpdate(
+      const updatedPrimary = await Issue.findOneAndUpdate(
         { tenantId: this.tenantId, publicId: primaryPublicId },
         {
           $addToSet: { reporterIds: { $each: secondary.reporterIds } },
@@ -227,8 +252,17 @@ export class IssueRepo {
           },
           $inc: { version: 1 },
         },
-        sess(session)
+        { new: true, ...sess(session) }
       ).exec();
+
+      if (updatedPrimary) {
+        const breakdown = recomputePriorityForIssue(updatedPrimary);
+        await Issue.updateOne(
+          { tenantId: this.tenantId, publicId: primaryPublicId },
+          { $set: { "priority.breakdown": breakdown } },
+          session ? { session } : {}
+        );
+      }
     }
   }
 
@@ -294,6 +328,28 @@ export class IssueRepo {
       { tenantId: this.tenantId, publicId },
       { $set: { "priority.override": { ...override, at: new Date() } }, $inc: { version: 1 } },
       { new: true, ...sess(session) }
+    ).exec();
+  }
+
+  // ── SLA Escalation ──────────────────────────────────────────────────────────
+
+  async recordEscalation(
+    publicId: string,
+    escalation: { level: number; notifyRole: string; triggeredAt: Date }
+  ): Promise<IIssue | null> {
+    await connectMongo();
+    return Issue.findOneAndUpdate(
+      {
+        tenantId: this.tenantId,
+        publicId,
+        triggeredLevels: { $ne: escalation.level },
+      },
+      {
+        $addToSet: { triggeredLevels: escalation.level },
+        $push: { escalations: escalation },
+        $inc: { version: 1 },
+      },
+      { new: true }
     ).exec();
   }
 }

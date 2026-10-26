@@ -94,6 +94,12 @@ eval-dedup: node_modules
 	node --env-file=.env apps/api/dist/db/eval-dedup.js
 	@echo "==> eval-dedup: OK"
 
+.PHONY: demo-flow
+demo-flow:
+	@echo "==> Running demo flow against running stack..."
+	node scripts/demo-flow.mjs
+	@echo "==> demo-flow: OK"
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 $(ENV_FILE):

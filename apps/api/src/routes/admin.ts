@@ -14,6 +14,7 @@ import {
 } from "@nivaran/shared";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { AppError } from "../middleware/error-handler.js";
+import { getFailedSlaJobs, retryFailedSlaJob } from "../services/sla-queue.js";
 
 export const adminRouter: Router = Router();
 
@@ -250,4 +251,29 @@ adminRouter.put("/sla-calendar", async (req: Request, res: Response) => {
   const input = slaCalendarSchema.parse(req.body);
   const updated = await getDb(req).updateSlaCalendar(input);
   res.status(200).json({ data: updated });
+});
+
+// ── Failed SLA Dead-Letter Queue Endpoints ────────────────────────────────────
+
+adminRouter.get("/sla/failed", async (req: Request, res: Response) => {
+  const tenantId = req.user?.tid;
+  if (!tenantId) throw new AppError("UNAUTHORIZED", "Missing tenant id", 401);
+
+  const failedJobs = await getFailedSlaJobs(tenantId);
+  res.status(200).json({ data: failedJobs });
+});
+
+adminRouter.post("/sla/failed/:jobId/retry", async (req: Request, res: Response) => {
+  const tenantId = req.user?.tid;
+  if (!tenantId) throw new AppError("UNAUTHORIZED", "Missing tenant id", 401);
+
+  const jobId = req.params["jobId"] as string;
+  if (!jobId) throw new AppError("BAD_REQUEST", "jobId is required", 400);
+
+  const result = await retryFailedSlaJob(tenantId, jobId);
+  if (!result.success) {
+    throw new AppError("BAD_REQUEST", result.message, 400);
+  }
+
+  res.status(200).json({ data: result });
 });

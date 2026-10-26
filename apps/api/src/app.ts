@@ -9,6 +9,8 @@ import { platformRouter } from "./routes/platform.js";
 import { adminRouter } from "./routes/admin.js";
 import { publicRouter } from "./routes/public.js";
 import { issuesRouter } from "./routes/issues.js";
+import { notificationsRouter } from "./routes/notifications.js";
+import { metricsRouter } from "./routes/metrics.js";
 import { connectMongo } from "./db/mongo.js";
 
 // Connect to Mongo lazily (non-blocking start; healthz checks TCP separately)
@@ -74,6 +76,8 @@ app.use("/api/v1/platform", platformRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/public", publicRouter);
 app.use("/api/v1/issues", issuesRouter);
+app.use("/api/v1/notifications", notificationsRouter);
+app.use("/api/v1/metrics", metricsRouter);
 
 // Central error handler
 app.use(errorHandler);

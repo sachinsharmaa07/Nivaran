@@ -1,55 +1,41 @@
 # Nivaran
 
-Multi-tenant civic issue reporting platform. Citizens report potholes, garbage, water leaks and more. The city resolves them.
-
-## Requirements
-
-- Docker ≥ 25, Docker Compose v2
-- Node 22 LTS (`nvm use`)
-- pnpm ≥ 10 (`corepack enable`)
+Multi-tenant civic issue reporting platform for Indian municipalities. Citizens report civic issues (potholes, garbage, water leaks), and municipal staff triage, route, assign, resolve, and monitor them under strict SLAs with DPDP-compliant public metrics.
 
 ## Quickstart
 
 ```sh
-git clone <repo-url> nivaran && cd nivaran
-cp .env.example .env           # review defaults — no secrets needed locally
-make up                        # starts all services (downloads images first time)
+make up && make migrate && make seed && make demo-flow
 ```
 
-Services:
+## URLs & Seeded Demo Logins
 
-| Service    | URL                   |
-| ---------- | --------------------- |
-| Web app    | http://localhost:5173 |
-| API        | http://localhost:4000 |
-| AI service | http://localhost:8000 |
-| MinIO UI   | http://localhost:9001 |
-| Mailpit    | http://localhost:8025 |
+- Web app: http://localhost:5173 | API: http://localhost:4000 | Mailpit: http://localhost:8025
+- All demo accounts use password: `Password123!` (development only)
+  - Demo Punjab: `citizen@punjab.local`, `staff@punjab.local`, `depthead@punjab.local`, `admin@punjab.local`
+  - Demo Maharashtra: `citizen@maharashtra.local`, `staff@maharashtra.local`, `depthead@maharashtra.local`, `admin@maharashtra.local`
+  - Demo Tamil Nadu: `citizen@tamilnadu.local`, `staff@tamilnadu.local`, `depthead@tamilnadu.local`, `admin@tamilnadu.local`
 
-## Development commands
+## Architecture
+
+- **Web (`apps/web`)**: React 18 + Vite PWA; localized citizen reporting, staff triage & public analytics dashboard.
+- **API (`apps/api`)**: Node/Express; multi-tenant RLS, auth (Argon2, OTP, Google OAuth PKCE), rate limiting.
+- **Worker (`apps/api/src/worker.ts`)**: BullMQ delayed jobs for SLA escalation tracking; non-blocking Nodemailer.
+- **Databases**: PostgreSQL 17 + PostGIS (tenants, users, departments, wards, metrics fact), MongoDB 8 (issues & audit logs), Redis 7 (sessions, rate limits, queues).
+- **Storage**: Local disk (`/data/uploads`) with sharp image striping, blur scoring & magic bytes validation.
+- **Tenancy**: Row-level security (`tenant_id`) across all tables; tenant-scoped queries with zero cross-tenant leak.
+
+## What is Built vs Not Built
+
+- **Built**: P0 compose stack, B1 auth & tenancy, B1g Google sign-in, B2 issue engine & dedup, B3 web UI, B4 SLA engine, notifications (Mailpit/Mongo) & public DPDP metrics (<10 masked).
+- **Not Built**: Real SMS gateway (mock OTP used), real GIS ward boundaries (synthetic grids used), production translations (en/hi/pa prototype translations only), AWS cloud deployment, and full AI categorization models (heuristic dedup & rule-based scoring used).
+
+## Test & Verification
 
 ```sh
-make up          # start all containers
-make down        # stop containers (keep data)
-make reset       # wipe volumes and rebuild images
-make logs        # follow all logs
-make lint        # ESLint + Prettier + ruff
-make typecheck   # TypeScript strict check
-make test        # Vitest + pytest
-make build       # build Docker images only
-make deps-check  # verify package list vs P0 plan
+make lint          # ESLint, Prettier, ruff
+make typecheck     # TypeScript strict check across workspaces
+make test          # Vitest (124+ unit/integration tests) + pytest
+make eval-dedup    # Duplicate detection precision & recall benchmark
+make demo-flow     # End-to-end integration flow against running stack
 ```
-
-## Project layout
-
-```
-apps/web        React PWA
-apps/api        Express API + worker
-apps/ai         FastAPI embeddings service
-packages/shared Zod schemas and types (P1+)
-infra/compose   Docker Compose files
-scripts/        Zero-dependency Node scripts
-docs/           SPEC, DESIGN, PHASES, runbooks
-```
-
-See `docs/SPEC.md` for the full specification and `PROGRESS.md` for the build journal.

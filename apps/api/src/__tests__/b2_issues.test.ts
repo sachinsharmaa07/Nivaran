@@ -11,6 +11,7 @@ import { TenantDb } from "../db/tenant-db.js";
 import { IssueRepo } from "../db/issue-repo.js";
 import { resolvePostgresUrl } from "../db/config.js";
 import { resetReportRateLimits } from "../routes/issues.js";
+import { rescoreOpenIssues } from "../services/rescoring.js";
 
 describe("B2 Issues — integration", () => {
   let punjabTenantId: string;
@@ -220,23 +221,79 @@ describe("B2 Issues — integration", () => {
     expect(hugeRes.body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
-  // ── +1 Endpoint ─────────────────────────────────────────────────────────────
+  // ── +1 Endpoint & Priority Recomputation ───────────────────────────────────
 
-  it("+1 endpoint allows citizens to confirm existing issue", async () => {
-    const createRes = await request(app).post("/api/v1/issues").send({
-      tenant_slug: "demo-punjab",
-      category_code: "water_leakage",
-      description: "Burst pipe on road wasting water",
-      lat: 31.64,
-      lon: 74.9,
-    });
-    const issueId = createRes.body.data.issue_id;
+  it("recomputes priority breakdown on +1 reporter, status change, and 15-minute rescore job", async () => {
+    // 1. Submit an issue as citizen 1
+    const createRes = await request(app)
+      .post("/api/v1/issues")
+      .set("Authorization", `Bearer ${punjabCitizenToken}`)
+      .send({
+        tenant_slug: "demo-punjab",
+        category_code: "pothole",
+        description: "Dangerous pothole needing rescoring checks",
+        lat: 31.64,
+        lon: 74.9,
+      });
+    expect(createRes.status).toBe(201);
+    const issueId = createRes.body.data.issue_id as string;
 
+    const repo = new IssueRepo(punjabTenantId);
+    const initialIssue = await repo.findByPublicId(issueId);
+    expect(initialIssue).not.toBeNull();
+    expect(initialIssue!.reporterIds.length).toBe(1);
+    expect(initialIssue!.priority.breakdown!.reporters!.raw).toBe(0);
+    expect(initialIssue!.priority.breakdown!.reporters!.contribution).toBe(0);
+
+    const initialComputedAt = new Date(initialIssue!.priority.breakdown!.computedAt!).getTime();
+
+    // Small delay to ensure timestamp progression
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // 2. Add a second reporter (+1) using staff token (different user in same tenant)
     const confirmRes = await request(app)
       .post(`/api/v1/issues/${issueId}/confirm`)
-      .set("Authorization", `Bearer ${punjabCitizenToken}`);
+      .set("Authorization", `Bearer ${punjabStaffToken}`);
     expect(confirmRes.status).toBe(200);
-    expect(confirmRes.body.data.reporter_count).toBeGreaterThan(0);
+    expect(confirmRes.body.data.reporter_count).toBe(2);
+
+    const issueAfterSecondReporter = await repo.findByPublicId(issueId);
+    expect(issueAfterSecondReporter!.reporterIds.length).toBe(2);
+    expect(issueAfterSecondReporter!.priority.breakdown!.reporters!.raw).toBeGreaterThan(0);
+    expect(issueAfterSecondReporter!.priority.breakdown!.reporters!.contribution).toBeGreaterThan(
+      0
+    );
+
+    const afterSecondComputedAt = new Date(
+      issueAfterSecondReporter!.priority.breakdown!.computedAt!
+    ).getTime();
+    expect(afterSecondComputedAt).toBeGreaterThan(initialComputedAt);
+
+    // 3. Status transition recomputes priority breakdown
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const transitionRes = await request(app)
+      .post(`/api/v1/issues/${issueId}/transition`)
+      .set("Authorization", `Bearer ${punjabStaffToken}`)
+      .send({ to: "triaged" });
+    expect(transitionRes.status).toBe(200);
+
+    const issueAfterTransition = await repo.findByPublicId(issueId);
+    expect(issueAfterTransition!.status).toBe("triaged");
+    const afterTransitionComputedAt = new Date(
+      issueAfterTransition!.priority.breakdown!.computedAt!
+    ).getTime();
+    expect(afterTransitionComputedAt).toBeGreaterThan(afterSecondComputedAt);
+
+    // 4. 15-minute rescoring job recomputes stored priority breakdown
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const rescoreResult = await rescoreOpenIssues(punjabTenantId);
+    expect(rescoreResult.rescored).toBeGreaterThan(0);
+
+    const issueAfterRescore = await repo.findByPublicId(issueId);
+    const afterRescoreComputedAt = new Date(
+      issueAfterRescore!.priority.breakdown!.computedAt!
+    ).getTime();
+    expect(afterRescoreComputedAt).toBeGreaterThan(afterTransitionComputedAt);
   });
 
   // ── Staff merge and unmerge ────────────────────────────────────────────────

@@ -72,7 +72,7 @@ const SEED_CATEGORIES = [
 const DEMO_PASSWORD = "Password123!"; // Fake password for seed data demo
 
 export async function seedDatabase(options: { includeSynthetic?: boolean } = {}): Promise<void> {
-  const includeSynthetic = options.includeSynthetic ?? true;
+  const includeSynthetic = options.includeSynthetic ?? (process.env["NODE_ENV"] !== "test");
   const platformDb = new PlatformDb();
 
   const tenantsConfig = [

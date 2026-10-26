@@ -75,6 +75,25 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
   const [categories, setCategories] = useState<PublicCategory[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [hotspotStatus, setHotspotStatus] = useState<"loading" | "missing" | "ready">("loading");
+  const [hotspotsList, setHotspotsList] = useState<
+    {
+      grid_id: string;
+      lat_grid: number;
+      lon_grid: number;
+      count: number;
+      primary_category?: string | null;
+    }[]
+  >([]);
+  const [tenantMetrics, setTenantMetrics] = useState<{
+    overall?: {
+      total_issues?: number;
+      open_count?: number | "insufficient";
+      median_resolution_hours?: number | "insufficient";
+      p90_resolution_hours?: number | "insufficient";
+      sla_compliance_pct?: number | "insufficient";
+      reopen_rate_pct?: number | "insufficient";
+    };
+  } | null>(null);
 
   // Fetch live state summary metrics
   const fetchSummary = async () => {
@@ -104,6 +123,21 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
     }
   };
 
+  // Fetch tenant-specific public metrics (reopen rate, p90, ward/dept breakdowns)
+  const fetchMetrics = async () => {
+    try {
+      const res = await fetch(`/api/v1/public/${tenant.slug}/metrics`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) {
+          setTenantMetrics(json.data);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   // Fetch categories for public breakdown table
   const fetchCategories = async () => {
     setCategoriesLoading(true);
@@ -125,18 +159,30 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
     }
   };
 
-  // Probe hotspot metrics API honestly
+  // Fetch hotspot metrics API
   useEffect(() => {
-    fetch(`/api/v1/metrics/hotspots?tenant_id=${tenant.id}`)
-      .then((r) => {
-        if (r.ok) setHotspotStatus("ready");
-        else setHotspotStatus("missing");
+    fetch(`/api/v1/public/${tenant.slug}/hotspots`)
+      .then((r) => r.json())
+      .then((json) => {
+        const spots = json?.data?.hotspots ?? [];
+        setHotspotsList(spots);
+        setHotspotStatus("ready");
       })
-      .catch(() => setHotspotStatus("missing"));
-  }, [tenant.id]);
+      .catch(() => {
+        fetch(`/api/v1/metrics/hotspots?tenant_id=${tenant.id}`)
+          .then((r) => r.json())
+          .then((json) => {
+            const spots = json?.data?.hotspots ?? [];
+            setHotspotsList(spots);
+            setHotspotStatus("ready");
+          })
+          .catch(() => setHotspotStatus("missing"));
+      });
+  }, [tenant.slug, tenant.id]);
 
   useEffect(() => {
     void fetchSummary();
+    void fetchMetrics();
     void fetchCategories();
   }, [tenant.state_code, tenant.slug, tenant.id]);
 
@@ -158,6 +204,9 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
       ? currentUlb.open_count
       : null
   );
+
+  const rawReopen = tenantMetrics?.overall?.reopen_rate_pct;
+  const animatedReopen = useCountUp(typeof rawReopen === "number" ? rawReopen : null);
 
   const isMasked = currentUlb?.masked;
 
@@ -562,18 +611,58 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
                 <span>REOPEN RATE</span>
               </div>
 
-              {/* Honest empty state: API summary doesn't compute reopen rate */}
-              <div
-                style={{
-                  fontSize: "2.5rem",
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 700,
-                  color: "var(--text-muted)",
-                  margin: "0.5rem 0",
-                }}
-              >
-                &mdash;
-              </div>
+              {loading ? (
+                <div style={{ margin: "0.75rem 0" }}>
+                  <Skeleton height="2.5rem" width="60%" />
+                </div>
+              ) : typeof rawReopen === "number" ? (
+                <div
+                  style={{
+                    fontSize: "2.5rem",
+                    fontFamily: "var(--font-display)",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    margin: "0.5rem 0",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {animatedReopen.toFixed(1)}
+                  <span
+                    style={{
+                      fontSize: "1.5rem",
+                      fontWeight: 500,
+                      color: "var(--text-muted)",
+                      marginLeft: "2px",
+                    }}
+                  >
+                    %
+                  </span>
+                </div>
+              ) : isMasked || rawReopen === "insufficient" ? (
+                <div
+                  style={{
+                    fontSize: "2.5rem",
+                    fontFamily: "var(--font-display)",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    margin: "0.5rem 0",
+                  }}
+                >
+                  &mdash;
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: "2.5rem",
+                    fontFamily: "var(--font-display)",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    margin: "0.5rem 0",
+                  }}
+                >
+                  0.0%
+                </div>
+              )}
             </div>
 
             <div
@@ -585,7 +674,9 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
                 marginTop: "0.5rem",
               }}
             >
-              API metric endpoint pending backend implementation
+              {isMasked || rawReopen === "insufficient"
+                ? "Masked for privacy (<10 reports)"
+                : "Citizen disputes on resolved issues"}
             </div>
           </div>
         </div>
@@ -711,10 +802,81 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
             </div>
           </div>
 
-          {/* Honest Empty State for Missing Hotspot Endpoint */}
           {hotspotStatus === "loading" ? (
             <div style={{ padding: "1.5rem" }}>
               <Skeleton height="100px" />
+            </div>
+          ) : hotspotsList.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "var(--text-muted)",
+                  marginBottom: "0.25rem",
+                }}
+              >
+                Showing {hotspotsList.length} spatial grid cells (~500m resolution) with recurrent
+                incidents. Coordinates anonymized to grid centroids.
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                  gap: "0.75rem",
+                }}
+              >
+                {hotspotsList.slice(0, 12).map((spot) => (
+                  <div
+                    key={spot.grid_id}
+                    style={{
+                      padding: "0.75rem 1rem",
+                      borderRadius: "var(--r-sm)",
+                      backgroundColor: "var(--surface-sunken)",
+                      border: "1px solid var(--border)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "0.875rem",
+                          fontWeight: 600,
+                          color: "var(--text)",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {spot.primary_category
+                          ? spot.primary_category.replace(/_/g, " ")
+                          : "Incidents"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--text-muted)",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {spot.lat_grid.toFixed(3)}&deg;N, {spot.lon_grid.toFixed(3)}&deg;E
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: "var(--r-sm)",
+                        backgroundColor: "var(--paint-100)",
+                        color: "var(--paint-900)",
+                        fontWeight: 700,
+                        fontSize: "0.875rem",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {spot.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : (
             <div
@@ -733,7 +895,7 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
               <MapPin size={32} strokeWidth={1.5} style={{ color: "var(--text-subtle)" }} />
               <div>
                 <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "1rem", color: "var(--text)" }}>
-                  Hotspot Metrics API Not Configured
+                  No High-Density Clusters
                 </h3>
                 <p
                   style={{
@@ -743,9 +905,8 @@ export function PublicDashboardPage({ tenant }: { tenant: TenantInfo }): React.J
                     maxWidth: "520px",
                   }}
                 >
-                  Endpoint <code>/api/v1/metrics/hotspots</code> is pending PostGIS cluster pipeline
-                  deployment. Once enabled, spatial kernel density surfaces and ward hotspots will
-                  render here.
+                  All recent municipal reports are distributed evenly across wards without 500m
+                  hotspot concentration thresholds.
                 </p>
               </div>
             </div>

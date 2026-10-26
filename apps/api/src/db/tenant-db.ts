@@ -852,4 +852,83 @@ export class TenantDb {
       ]
     );
   }
+
+  async recordIssueMetricsBatch(
+    items: {
+      issue_id: string;
+      status: string;
+      category_code?: string | undefined;
+      department_id?: string | undefined;
+      ward_id?: string | undefined;
+      sla_breached?: boolean | undefined;
+      resolution_time_hours?: number | undefined;
+      lat?: number | undefined;
+      lon?: number | undefined;
+      landmark?: string | undefined;
+      pincode?: string | undefined;
+      created_at?: Date | undefined;
+      resolved_at?: Date | undefined;
+    }[]
+  ): Promise<void> {
+    const CHUNK_SIZE = 25;
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+      const chunk = items.slice(i, i + CHUNK_SIZE);
+      await Promise.all(chunk.map((item) => this.recordIssueMetric(item)));
+    }
+  }
+
+  async getIssueMetricsFact(): Promise<
+    {
+      issue_id: string;
+      status: string;
+      category_code: string | null;
+      department_id: string | null;
+      ward_id: string | null;
+      sla_breached: boolean;
+      resolution_time_hours: number | null;
+      lat: number | null;
+      lon: number | null;
+      created_at: Date;
+      resolved_at: Date | null;
+    }[]
+  > {
+    const res = await this.pool.query<{
+      issue_id: string;
+      status: string;
+      category_code: string | null;
+      department_id: string | null;
+      ward_id: string | null;
+      sla_breached: boolean;
+      resolution_time_hours: string | null;
+      lat: string | null;
+      lon: string | null;
+      created_at: Date;
+      resolved_at: Date | null;
+    }>(
+      `SELECT
+         issue_id, status, category_code, department_id, ward_id,
+         sla_breached, resolution_time_hours,
+         ST_Y(location::geometry)::text as lat,
+         ST_X(location::geometry)::text as lon,
+         created_at, resolved_at
+       FROM issue_metrics_fact
+       WHERE tenant_id = $1`,
+      [this.tenantId]
+    );
+
+    return res.rows.map((r) => ({
+      issue_id: r.issue_id,
+      status: r.status,
+      category_code: r.category_code,
+      department_id: r.department_id,
+      ward_id: r.ward_id,
+      sla_breached: Boolean(r.sla_breached),
+      resolution_time_hours:
+        r.resolution_time_hours != null ? Number(r.resolution_time_hours) : null,
+      lat: r.lat != null ? Number(r.lat) : null,
+      lon: r.lon != null ? Number(r.lon) : null,
+      created_at: r.created_at,
+      resolved_at: r.resolved_at,
+    }));
+  }
 }

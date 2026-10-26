@@ -109,6 +109,14 @@ export interface IIssue extends Document {
   duplicates: DuplicateLinkDoc[];
   resolution?: ResolutionDoc | undefined;
   reopenCount: number;
+  triggeredLevels?: number[] | undefined;
+  escalations?:
+    | {
+        level: number;
+        notifyRole: string;
+        triggeredAt: Date;
+      }[]
+    | undefined;
   version: number;
   clusterId?: string | undefined;
   isNearMiss?: boolean | undefined;
@@ -241,6 +249,18 @@ const IssueSchema = new Schema<IIssue>(
     duplicates: { type: [DuplicateLinkSchema], default: [] },
     resolution: ResolutionSchema,
     reopenCount: { type: Number, default: 0 },
+    triggeredLevels: { type: [Number], default: [] },
+    escalations: {
+      type: [
+        {
+          _id: false,
+          level: Number,
+          notifyRole: String,
+          triggeredAt: Date,
+        },
+      ],
+      default: [],
+    },
     version: { type: Number, default: 1 },
     clusterId: { type: String, index: true },
     isNearMiss: { type: Boolean },

@@ -12,6 +12,8 @@ import {
   canTransition,
   ROLE_RANKS,
 } from "../domain/algorithms.js";
+import { scheduleSlaJobs, cancelSlaJobs } from "../services/sla-queue.js";
+import { sendNotification } from "../services/notifications.js";
 
 export const issuesRouter: Router = Router();
 const platformDb = new PlatformDb();
@@ -203,6 +205,26 @@ issuesRouter.post("/", async (req: Request, res: Response) => {
     sla_breached: false,
   });
 
+  // Schedule BullMQ SLA delayed escalation jobs
+  if (slaPolicy) {
+    const calendar = await tenantDb.getSlaCalendar();
+    void scheduleSlaJobs(
+      tenant.id,
+      {
+        publicId,
+        createdAt: issue.createdAt,
+        status: issue.status,
+      },
+      {
+        respondHours: slaPolicy.respond_hours,
+        resolveHours: slaPolicy.resolve_hours,
+        escalationLevels: slaPolicy.escalation_levels,
+        resolveBy: slaResolveBy,
+      },
+      calendar
+    );
+  }
+
   // Duplicate suggestions
   const gpsAccuracy = Math.min(input.gps_accuracy_m ?? 0, 30);
   const rEff = category.dedup_radius_m + gpsAccuracy;
@@ -329,6 +351,7 @@ issuesRouter.post("/:publicId/confirm", async (req: Request, res: Response) => {
     data: {
       public_id: publicId,
       reporter_count: issue.reporterIds.length,
+      priority: issue.priority,
     },
   });
 });
@@ -405,8 +428,67 @@ issuesRouter.post("/:publicId/transition", async (req: Request, res: Response) =
     payload: { from: issue.status, to: input.to, note: input.note },
   });
 
+  // B4: Cancel SLA jobs on resolve/close/reject; dispatch notifications
+  if (["resolved", "closed", "rejected"].includes(input.to)) {
+    void cancelSlaJobs(publicId, issue.slaPolicy?.escalationLevels);
+
+    if (input.to === "resolved") {
+      const resHours = Math.max(
+        0.1,
+        Number(((Date.now() - new Date(issue.createdAt).getTime()) / 3_600_000).toFixed(2))
+      );
+      const isBreached = issue.slaPolicy?.resolveBy
+        ? Date.now() > new Date(issue.slaPolicy.resolveBy).getTime()
+        : false;
+
+      void new TenantDb(tenantId).recordIssueMetric({
+        issue_id: publicId,
+        status: input.to,
+        resolved_at: new Date(),
+        resolution_time_hours: resHours,
+        sla_breached: isBreached,
+      });
+
+      // Resolve notification prompts citizen to confirm
+      void sendNotification({
+        tenantId,
+        userId: issue.reporterId,
+        issueId: publicId,
+        type: "resolve",
+        meta: { note: input.note },
+      });
+    }
+  }
+
+  if (input.to === "assigned") {
+    void sendNotification({
+      tenantId,
+      userId: issue.reporterId,
+      issueId: publicId,
+      type: "assign",
+      meta: { department: issue.department?.name },
+    });
+  }
+
+  if (input.to === "reopened") {
+    void sendNotification({
+      tenantId,
+      userId: issue.department?.id ? `dept:${issue.department.id}` : "staff",
+      role: "staff",
+      issueId: publicId,
+      type: "reopen",
+      meta: { note: input.note },
+    });
+
+    if (issue.slaPolicy) {
+      void new TenantDb(tenantId).getSlaCalendar().then((cal) => {
+        void scheduleSlaJobs(tenantId, updated ?? issue, issue.slaPolicy!, cal);
+      });
+    }
+  }
+
   res.status(200).json({
-    data: { public_id: publicId, status: updated?.status },
+    data: { public_id: publicId, status: updated?.status, priority: updated?.priority },
   });
 });
 
@@ -444,6 +526,9 @@ issuesRouter.post("/:publicId/merge", async (req: Request, res: Response) => {
     event: "MERGED_AS_DUPLICATE",
     payload: { primaryId: input.primary_public_id },
   });
+
+  // Cancel SLA jobs for the merged secondary issue
+  void cancelSlaJobs(publicId);
 
   res.status(200).json({ data: { merged: true } });
 });

@@ -26,7 +26,8 @@ WORKDIR /app
 ENV IN_DOCKER=1
 
 RUN addgroup -S nivaran && adduser -S -G nivaran nivaran \
-    && apk add --no-cache wget
+    && apk add --no-cache wget \
+    && mkdir -p /data/uploads && chown -R nivaran:nivaran /data/uploads
 
 COPY --from=builder /deploy ./
 

@@ -4,4 +4,4 @@
 - [x] B1 backend core (auth, tenancy, config)
 - [x] B2 issues, dedup, priority, workflow
 - [x] B3 frontend
-- [ ] B4 SLA, notifications, metrics
+- [x] B4 SLA, notifications, metrics
