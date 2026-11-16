@@ -190,3 +190,36 @@ Compose profiles: `core` (data services), `app` (web, api, worker, ai). Healthch
 ## 13. Glossary
 
 ULB: Urban Local Body (municipal authority). Ward: administrative sub-area. SLA: service-level agreement (target response and resolution times). Tenant: one ULB's isolated workspace. Snapshot: copy of config stored on an issue at creation. Outbox: transactional record used to sync derived data.
+
+## 14. Content, discussion and assistant
+
+Three modular sub-systems extend the platform for citizen engagement and public communication:
+
+- **`content`**: Civic updates, announcements, and news published by staff. Structured block JSON, multi-lingual (en/hi/pa), cover media, and linked civic issues.
+- **`discussion`**: Two-level threaded comments and citizen replies on published posts with staff moderation, reporting, and automated toxicity filters.
+- **`assistant`**: Automated civic chatbot executing client-side / server-side safe tools (issue tracking, FAQ retrieval, report drafts) with optional LLM rephrasing.
+
+### Data Collections (MongoDB)
+
+All collections enforce strict multi-tenancy. Every document includes `tenantId` and every compound index is prefixed with `tenantId`:
+
+- `posts`: `{ tenantId, slug, status (draft|scheduled|published|archived), authorId, title: { en, hi?, pa? }, summary: { ... }, blocks: { en: Block[], ... }, coverMediaId, tags: string[], relatedIssueIds: string[], publishedAt, scheduledFor, commentsEnabled, commentCount, version, createdAt, updatedAt }`. Indexes: `(tenantId, slug)` unique, `(tenantId, status, publishedAt desc)`, text on titles/summaries/blocks with `default_language: "none"`.
+- `media`: `{ tenantId, key, variants: { w480, w960, w1600, fallbackJpg }, altText, caption, width, height, bytes, sha256, uploaderId, createdAt }`. Indexes: `(tenantId, sha256)` unique.
+- `comments`: `{ tenantId, postId, rootId, replyToId, authorId, authorDisplay, body, status (visible|pending|hidden|deleted), reportCount, replyCount, createdAt, editedAt }`. Indexes: `(tenantId, postId, rootId, createdAt)`.
+- `comment_reports`: `{ tenantId, commentId, reporterId, reason, createdAt }`. Indexes: `(tenantId, commentId, reporterId)` unique.
+- `faq_entries`: `{ tenantId, question: { en, hi?, pa? }, answer: { en, hi?, pa? }, tags: string[], active, createdAt }`. Indexes: `(tenantId, active)`.
+- `chat_logs`: `{ tenantId, sessionId, userId?, redactedText, intent, mode (rules|llm), sourceIds: string[], latencyMs, feedback?: "up"|"down", createdAt }`. Indexes: `(tenantId, createdAt)`. TTL: 30 days.
+
+### Caching and Performance
+
+- Published post lists and public articles are cached in Redis (`cache:posts:<tenantId>:<locale>:<filterHash>`) with a 60-second TTL.
+- Cache keys are invalidated immediately upon post publish, update, scheduling, or archival.
+- High-performance ETags supported for conditional requests (`If-None-Match`).
+- Media served with `Cache-Control: public, max-age=31536000, immutable`.
+
+### Rate Limits & Safety Guardrails
+
+- **Rate Limits**: Comments: 10 per 10 minutes per user, 30 per hour per IP. Assistant chat: 20 per 5 minutes per user/IP. Media upload: 20 per hour per staff member.
+- **Content Security**: Posts use typed JSON blocks only (no raw HTML / rich text libraries); React renders text nodes with zero `dangerouslySetInnerHTML`.
+- **Discussion Moderation**: 2-level nesting max. At 3 distinct reports, comment auto-hides pending staff review. Blocked word lists divert comments to `pending`. Soft-deletion preserves reply thread integrity while wiping body to "Comment removed".
+- **Chatbot Guardrails**: Strict server-side tool execution based on session JWT claims (cannot access other tenants). Redaction of phones, emails, Aadhaar, and PAN before any LLM processing. Fallback to rule-based FAQ retrieval if LLM budget exceeds daily limit or circuit breaker opens (3 consecutive failures).

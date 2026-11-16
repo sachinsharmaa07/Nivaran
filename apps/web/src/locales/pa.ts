@@ -1,5 +1,5 @@
 const pa = {
-  app_title: "ਨਿਵਾਰਣ",
+  app_title: "ਸਿਵਿਕਪਲਸ (CivicPulse)",
   app_tagline: "ਨਾਗਰਿਕ ਸਮੱਸਿਆ ਰਿਪੋਰਟਿੰਗ ਅਤੇ ਨਿਪਟਾਰਾ ਪੋਰਟਲ",
   city_picker_title: "ਆਪਣਾ ਸ਼ਹਿਰ / ਨਗਰ ਪਾਲਿਕਾ ਚੁਣੋ",
   city_picker_subtitle: "ਜਾਰੀ ਰੱਖਣ ਲਈ ਕਿਰਪਾ ਕਰਕੇ ਆਪਣਾ ਰਾਜ ਅਤੇ ਨਗਰ ਪਾਲਿਕਾ ਚੁਣੋ",

@@ -14,9 +14,9 @@ const API_BASE = process.env.API_BASE_URL || "http://localhost:4000";
 const MAILPIT_BASE = process.env.MAILPIT_URL || "http://localhost:8025";
 const TENANT_SLUG = "demo-punjab";
 
-// 1x1 valid JPEG image buffer
+// Valid 10x10 JPEG image buffer decodable by sharp
 const TINY_JPEG_BASE64 =
-  "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+  "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAKAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABgj/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABykX//Z";
 const TINY_JPEG_BUFFER = Buffer.from(TINY_JPEG_BASE64, "base64");
 
 async function request(path, options = {}) {

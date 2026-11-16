@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { Link } from "react-router";
-import { Plus, MapPin, ChevronRight } from "lucide-react";
+import { Plus, ChevronRight, ThumbsUp, Crosshair } from "lucide-react";
 import type { MapPin as MapPinType } from "../components/CitizenMap.js";
 import { ReportWizard } from "../components/ReportWizard.js";
 import type { TenantInfo } from "../components/CityPicker.js";
@@ -15,6 +15,8 @@ import {
   ErrorState,
   Dialog,
   LaneLineLoader,
+  CategoryIcon,
+  useToast,
 } from "../ui/index.js";
 
 const CitizenMap = lazy(() => import("../components/CitizenMap.js"));
@@ -25,6 +27,7 @@ interface ApiIssueItem {
   category?: { code: string; name?: string; names?: Record<string, string> };
   status: string;
   description: string;
+  reporterIds?: string[];
   priority?: {
     breakdown?: { score?: number; level?: string };
     override?: { score?: number; level?: string };
@@ -39,6 +42,7 @@ export function CitizenHomePage({
   onOpenAuth: () => void;
 }): React.JSX.Element {
   const { authFetch } = useAuth();
+  const { showToast } = useToast();
 
   const [pins, setPins] = useState<MapPinType[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -46,6 +50,62 @@ export function CitizenHomePage({
   const [selectedPinId, setSelectedPinId] = useState<string | undefined>(undefined);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [reportStep, setReportStep] = useState<number>(1);
+  const [reportSubmittedId, setReportSubmittedId] = useState<string>("");
+  const [upvotedIds, setUpvotedIds] = useState<Set<string>>(new Set());
+  const [upvotingId, setUpvotingId] = useState<string | null>(null);
+
+  const handleUpvote = async (publicId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (upvotingId) return;
+    setUpvotingId(publicId);
+
+    try {
+      const res = await authFetch(`/api/v1/issues/${publicId}/upvote`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const count = data.data?.upvote_count ?? data.data?.reporter_count;
+        setUpvotedIds((prev) => new Set(prev).add(publicId));
+        setPins((prev) =>
+          prev.map((p) =>
+            p.publicId === publicId ? { ...p, upvoteCount: count ?? (p.upvoteCount ?? 1) + 1 } : p
+          )
+        );
+        showToast({
+          message: data.data?.already_upvoted
+            ? `You have already confirmed/upvoted ${publicId}`
+            : `Upvoted ${publicId} (+1 confirmation counted)`,
+          variant: "success",
+        });
+      } else {
+        throw new Error(data.error?.message || "Could not upvote issue");
+      }
+    } catch (err: unknown) {
+      showToast({
+        message: err instanceof Error ? err.message : "Failed to record upvote",
+        variant: "error",
+      });
+    } finally {
+      setUpvotingId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const wiz = params.get("wizard");
+      if (wiz === "review") {
+        setReportStep(4);
+        setReportModalOpen(true);
+      } else if (wiz === "success") {
+        setReportStep(4);
+        setReportSubmittedId("NVR-PUN-000102");
+        setReportModalOpen(true);
+      }
+    }
+  }, []);
 
   // Center coordinates per state/district (Default to Ludhiana: 30.901, 75.8573)
   const defaultCenter =
@@ -56,6 +116,41 @@ export function CitizenHomePage({
         : tenant.state_code === "TN"
           ? { lat: 13.0827, lon: 80.2707 }
           : { lat: 28.6139, lon: 77.209 };
+
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lon: number }>(defaultCenter);
+  const [locatingUser, setLocatingUser] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMapCenter(defaultCenter);
+  }, [tenant.slug]);
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      showToast({ message: "Geolocation is not supported by your browser", variant: "error" });
+      return;
+    }
+    setLocatingUser(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocatingUser(false);
+        const lat = Number(pos.coords.latitude.toFixed(5));
+        const lon = Number(pos.coords.longitude.toFixed(5));
+        setMapCenter({ lat, lon });
+        showToast({
+          message: `Centered on your current location (±${Math.round(pos.coords.accuracy)}m)`,
+          variant: "success",
+        });
+      },
+      (err) => {
+        setLocatingUser(false);
+        showToast({
+          message: err.message || "Could not retrieve current location",
+          variant: "error",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  };
 
   const fetchIssues = () => {
     setLoading(true);
@@ -85,6 +180,7 @@ export function CitizenHomePage({
               priorityScore: i.priority?.override?.score ?? i.priority?.breakdown?.score ?? 30,
               priorityLevel:
                 i.priority?.override?.level ?? i.priority?.breakdown?.level ?? "medium",
+              upvoteCount: i.reporterIds?.length ?? 1,
             }));
           setPins(mappedPins);
         } else {
@@ -115,7 +211,7 @@ export function CitizenHomePage({
         backgroundColor: "var(--bg)",
       }}
     >
-      {/* Full-bleed interactive map */}
+      {/* Full-bleed interactive map (tile layer calmed via CSS) */}
       <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
         <Suspense
           fallback={
@@ -140,7 +236,7 @@ export function CitizenHomePage({
         >
           <CitizenMap
             pins={pins}
-            center={defaultCenter}
+            center={mapCenter}
             zoom={13}
             selectedPinId={selectedPinId}
             onSelectPin={(pin) => {
@@ -149,40 +245,46 @@ export function CitizenHomePage({
             }}
           />
         </Suspense>
-      </div>
 
-      {/* Floating Municipality indicator */}
-      <div
-        style={{
-          position: "absolute",
-          top: "0.75rem",
-          left: "0.75rem",
-          zIndex: 10,
-          pointerEvents: "none",
-        }}
-      >
+        {/* Floating "Use Current Location" button on map */}
         <div
           style={{
-            backgroundColor: "var(--surface-raised)",
-            padding: "0.375rem 0.75rem",
-            borderRadius: "var(--r-sm)",
-            border: "1px solid var(--border)",
-            fontSize: "0.8125rem",
-            fontWeight: 600,
-            color: "var(--text)",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.375rem",
-            boxShadow: "var(--shadow-overlay)",
+            position: "absolute",
+            top: "1rem",
+            right: "1rem",
+            zIndex: 1000,
           }}
         >
-          <MapPin
-            size={13}
-            strokeWidth={1.75}
-            style={{ color: "var(--text-muted)" }}
-            aria-hidden={true}
-          />
-          <span>{tenant.name}</span>
+          <button
+            type="button"
+            onClick={handleUseCurrentLocation}
+            disabled={locatingUser}
+            className="touch-target"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              padding: "0.5rem 0.875rem",
+              backgroundColor: "var(--surface)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-full)",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.2)",
+              fontWeight: 600,
+              fontSize: "0.8125rem",
+              cursor: locatingUser ? "wait" : "pointer",
+              transition: "all var(--dur-fast)",
+            }}
+            title="Detect and center map on your current location"
+          >
+            <Crosshair
+              size={16}
+              strokeWidth={2}
+              className={locatingUser ? "spin-pulse" : ""}
+              style={{ color: "var(--kerb-500)" }}
+            />
+            <span>{locatingUser ? "Locating..." : "Use Current Location"}</span>
+          </button>
         </div>
       </div>
 
@@ -220,6 +322,7 @@ export function CitizenHomePage({
       >
         {/* ONE main action per screen: Road-paint yellow CTA */}
         <Button
+          id="btn-report-issue"
           variant="cta"
           onClick={() => setReportModalOpen(true)}
           style={{ width: "100%", minHeight: "44px" }}
@@ -246,8 +349,22 @@ export function CitizenHomePage({
               </span>
               <StatusChip status={selectedPin.status} />
             </div>
-            <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-muted)" }}>
-              {selectedPin.categoryName || selectedPin.categoryCode}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.375rem",
+                fontSize: "0.8125rem",
+                fontWeight: 600,
+                color: "var(--text-muted)",
+              }}
+            >
+              <CategoryIcon
+                category={selectedPin.categoryCode}
+                size={16}
+                color="var(--text-muted)"
+              />
+              <span>{selectedPin.categoryName || selectedPin.categoryCode}</span>
             </div>
             <p
               style={{
@@ -270,9 +387,39 @@ export function CitizenHomePage({
                 justifyContent: "space-between",
                 alignItems: "center",
                 marginTop: "2px",
+                flexWrap: "wrap",
+                gap: "0.5rem",
               }}
             >
-              <PriorityMeter priority={selectedPin.priorityScore ?? 30} />
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <PriorityMeter priority={selectedPin.priorityScore ?? 30} />
+                <button
+                  type="button"
+                  onClick={(e) => handleUpvote(selectedPin.publicId, e)}
+                  disabled={upvotingId === selectedPin.publicId}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "3px 8px",
+                    borderRadius: "var(--r-sm)",
+                    border: "1px solid var(--border)",
+                    backgroundColor: upvotedIds.has(selectedPin.publicId)
+                      ? "var(--paint-50)"
+                      : "var(--surface)",
+                    color: upvotedIds.has(selectedPin.publicId)
+                      ? "var(--paint-700)"
+                      : "var(--text)",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  title="Upvote / confirm this civic issue"
+                >
+                  <ThumbsUp size={12} strokeWidth={2} />
+                  <span>{selectedPin.upvoteCount ?? 1} Upvotes</span>
+                </button>
+              </div>
               <Link
                 to={`/issues/${selectedPin.publicId}`}
                 style={{
@@ -366,9 +513,17 @@ export function CitizenHomePage({
                   </div>
 
                   <div
-                    style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-muted)" }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.375rem",
+                      fontSize: "0.8125rem",
+                      fontWeight: 600,
+                      color: "var(--text-muted)",
+                    }}
                   >
-                    {pin.categoryName || pin.categoryCode}
+                    <CategoryIcon category={pin.categoryCode} size={14} color="var(--text-muted)" />
+                    <span>{pin.categoryName || pin.categoryCode}</span>
                   </div>
 
                   <p
@@ -391,9 +546,38 @@ export function CitizenHomePage({
                       justifyContent: "space-between",
                       alignItems: "center",
                       marginTop: "2px",
+                      gap: "0.5rem",
                     }}
                   >
-                    <PriorityMeter priority={pin.priorityScore ?? 30} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <PriorityMeter priority={pin.priorityScore ?? 30} />
+                      <button
+                        type="button"
+                        onClick={(e) => handleUpvote(pin.publicId, e)}
+                        disabled={upvotingId === pin.publicId}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "3px",
+                          padding: "2px 6px",
+                          borderRadius: "var(--r-sm)",
+                          border: "1px solid var(--border)",
+                          backgroundColor: upvotedIds.has(pin.publicId)
+                            ? "var(--paint-50)"
+                            : "var(--surface)",
+                          color: upvotedIds.has(pin.publicId)
+                            ? "var(--paint-700)"
+                            : "var(--text-muted)",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        title="Upvote / confirm issue"
+                      >
+                        <ThumbsUp size={11} strokeWidth={2} />
+                        <span>{pin.upvoteCount ?? 1}</span>
+                      </button>
+                    </div>
                     <Link
                       to={`/issues/${pin.publicId}`}
                       onClick={(e) => e.stopPropagation()}
@@ -421,13 +605,15 @@ export function CitizenHomePage({
       <Dialog
         isOpen={reportModalOpen}
         onClose={() => setReportModalOpen(false)}
-        title="Report a Civic Issue"
+        title="Report a civic issue"
         description="Submit a road defect, broken light, water leak or overflowing bin"
         maxWidth="580px"
       >
         <ReportWizard
           tenant={tenant}
-          initialCoordinates={defaultCenter}
+          initialCoordinates={mapCenter}
+          initialStep={reportStep}
+          initialSubmittedId={reportSubmittedId}
           onComplete={() => {
             setReportModalOpen(false);
             fetchIssues();

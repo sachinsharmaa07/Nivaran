@@ -7,6 +7,7 @@ import {
   Upload,
   AlertCircle,
   Plus,
+  Crosshair,
 } from "lucide-react";
 import { useTranslation } from "../utils/i18n.js";
 import { compressPhoto, type CompressionResult } from "../utils/imageCompression.js";
@@ -20,6 +21,9 @@ import {
   Select,
   LaneTimeline,
   LaneLineLoader,
+  SignPlate,
+  CategoryIcon,
+  IllustrationSuccess,
   useToast,
 } from "../ui/index.js";
 
@@ -46,29 +50,38 @@ export function ReportWizard({
   tenant,
   initialCoordinates,
   onComplete,
+  initialStep = 1,
+  initialSubmittedId = "",
 }: {
   tenant: TenantInfo;
   initialCoordinates?: { lat: number; lon: number } | undefined;
   onComplete?: (() => void) | undefined;
+  initialStep?: number | undefined;
+  initialSubmittedId?: string | undefined;
 }): React.JSX.Element {
   const { locale } = useTranslation();
   const { token, authFetch } = useAuth();
   const { showToast } = useToast();
 
-  const [step, setStep] = useState<number>(1);
+  const [step, setStep] = useState<number>(initialStep);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(() => {
-    return localStorage.getItem("draft_category") || "";
+    return localStorage.getItem("draft_category") || (initialStep === 4 ? "pothole" : "");
   });
 
   const [landmark, setLandmark] = useState<string>(() => {
-    return localStorage.getItem("draft_landmark") || "";
+    return (
+      localStorage.getItem("draft_landmark") || (initialStep === 4 ? "Near main bus stop" : "")
+    );
   });
   const [pincode, setPincode] = useState<string>(() => {
-    return localStorage.getItem("draft_pincode") || "";
+    return localStorage.getItem("draft_pincode") || (initialStep === 4 ? "141001" : "");
   });
   const [description, setDescription] = useState<string>(() => {
-    return localStorage.getItem("draft_description") || "";
+    return (
+      localStorage.getItem("draft_description") ||
+      (initialStep === 4 ? "Deep road crater near bus stop junction" : "")
+    );
   });
   const [coordinates, setCoordinates] = useState<{ lat: number; lon: number }>(() => {
     return initialCoordinates || { lat: 30.901, lon: 75.8573 };
@@ -78,7 +91,9 @@ export function ReportWizard({
   const [compressing, setCompressing] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submittedPublicId, setSubmittedPublicId] = useState<string | null>(null);
+  const [submittedPublicId, setSubmittedPublicId] = useState<string | null>(
+    initialSubmittedId || null
+  );
   const [duplicateSuggestions, setDuplicateSuggestions] = useState<DuplicateSuggestion[]>([]);
   const [confirmedPlusOne, setConfirmedPlusOne] = useState<Set<string>>(new Set());
 
@@ -110,6 +125,37 @@ export function ReportWizard({
       })
       .catch(() => undefined);
   }, [tenant.slug, locale]);
+
+  const [locating, setLocating] = useState<boolean>(false);
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      showToast({ message: "Geolocation is not supported by your browser", variant: "error" });
+      return;
+    }
+    setLocating(true);
+    setErrorMsg(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const lat = Number(pos.coords.latitude.toFixed(5));
+        const lon = Number(pos.coords.longitude.toFixed(5));
+        setCoordinates({ lat, lon });
+        showToast({
+          message: `Current location set (accurate within ±${Math.round(pos.coords.accuracy)}m)`,
+          variant: "success",
+        });
+      },
+      (err) => {
+        setLocating(false);
+        showToast({
+          message: err.message || "Unable to acquire current location. Please adjust on the map.",
+          variant: "error",
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -157,14 +203,19 @@ export function ReportWizard({
 
     try {
       const idempotencyKey = `rep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const cleanDesc = description.trim();
+      const safeDesc = cleanDesc.length >= 5 ? cleanDesc : `${cleanDesc} issue report`.trim();
+      const cleanPincode = pincode.trim();
+      const safePincode = /^[1-9][0-9]{5}$/.test(cleanPincode) ? cleanPincode : undefined;
+
       const body: Record<string, unknown> = {
         tenant_slug: tenant.slug,
-        category_code: selectedCategory || categories[0]?.code || "road_pothole",
-        description: description.trim() || "Civic report submitted via web portal",
-        lat: coordinates.lat,
-        lon: coordinates.lon,
+        category_code: selectedCategory || categories[0]?.code || "pothole",
+        description: safeDesc || "Civic report submitted via web portal",
+        lat: Number(coordinates.lat),
+        lon: Number(coordinates.lon),
         landmark: landmark.trim() || undefined,
-        pincode: pincode.trim() || undefined,
+        pincode: safePincode,
         photo_keys: photoResult ? ["evidence-1.jpg"] : [],
       };
 
@@ -223,12 +274,12 @@ export function ReportWizard({
   };
 
   const wizardSteps = [
-    { id: "where", label: "1. Where", completed: step > 1, current: step === 1 },
-    { id: "what", label: "2. What", completed: step > 2, current: step === 2 },
-    { id: "photos", label: "3. Photos", completed: step > 3, current: step === 3 },
+    { id: "where", label: "Where", completed: step > 1, current: step === 1 },
+    { id: "what", label: "What", completed: step > 2, current: step === 2 },
+    { id: "photos", label: "Photos", completed: step > 3, current: step === 3 },
     {
       id: "review",
-      label: "4. Review",
+      label: "Review",
       completed: Boolean(submittedPublicId),
       current: step === 4,
     },
@@ -282,8 +333,16 @@ export function ReportWizard({
       {step === 1 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <h2 style={{ fontSize: "1.25rem", margin: "0 0 0.25rem 0", color: "var(--text)" }}>
-              Where is the issue located?
+            <h2
+              className="display-text-sm"
+              style={{
+                fontSize: "clamp(1.25rem, 1rem + 1vw, 1.75rem)",
+                margin: "0 0 0.25rem 0",
+                color: "var(--text)",
+                lineHeight: 1.1,
+              }}
+            >
+              Where is the issue?
             </h2>
             <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
               Pin the exact spot on the map so municipal workers can find it
@@ -299,6 +358,52 @@ export function ReportWizard({
           >
             <LazyMap initialCoordinates={coordinates} onLocationChange={(c) => setCoordinates(c)} />
           </Suspense>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.625rem 0.875rem",
+              backgroundColor: "var(--surface-sunken)",
+              borderRadius: "var(--r-md)",
+              border: "1px solid var(--border)",
+              flexWrap: "wrap",
+              gap: "0.5rem",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.8125rem", color: "var(--text)" }}>
+                Selected Pin Location
+              </div>
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                Lat: {coordinates.lat.toFixed(5)}, Lon: {coordinates.lon.toFixed(5)}
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleUseCurrentLocation}
+              disabled={locating}
+              style={{
+                minHeight: "34px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.375rem",
+              }}
+            >
+              <Crosshair size={14} strokeWidth={2} className={locating ? "spin-pulse" : ""} />
+              <span>{locating ? "Locating..." : "Use Current Location"}</span>
+            </Button>
+          </div>
 
           <Field label="Nearby Landmark" hint="E.g., Outside Community Health Centre, Main GT Road">
             {({ id, "aria-describedby": ariaDescribedBy }) => (
@@ -326,7 +431,12 @@ export function ReportWizard({
           </Field>
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.5rem" }}>
-            <Button variant="cta" onClick={() => setStep(2)} style={{ minWidth: "120px" }}>
+            <Button
+              id="wizard-step1-next"
+              variant="cta"
+              onClick={() => setStep(2)}
+              style={{ minWidth: "120px" }}
+            >
               <span>Next</span>
               <ArrowRight size={15} strokeWidth={1.75} aria-hidden={true} />
             </Button>
@@ -338,11 +448,19 @@ export function ReportWizard({
       {step === 2 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <h2 style={{ fontSize: "1.25rem", margin: "0 0 0.25rem 0", color: "var(--text)" }}>
+            <h2
+              className="display-text-sm"
+              style={{
+                fontSize: "clamp(1.25rem, 1rem + 1vw, 1.75rem)",
+                margin: "0 0 0.25rem 0",
+                color: "var(--text)",
+                lineHeight: 1.1,
+              }}
+            >
               What is the problem?
             </h2>
             <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
-              Select the appropriate civic category and describe what needs fixing
+              Select the category and describe what needs fixing
             </p>
           </div>
 
@@ -361,10 +479,12 @@ export function ReportWizard({
                   ))
                 ) : (
                   <>
-                    <option value="road_pothole">Road: Pothole / Crater</option>
-                    <option value="waste_overflow">Sanitation: Garbage Overflow</option>
-                    <option value="street_light">Electrical: Street Light Defect</option>
+                    <option value="pothole">Road: Pothole / Crater</option>
+                    <option value="garbage">Sanitation: Garbage Overflow</option>
+                    <option value="streetlight">Electrical: Street Light Defect</option>
                     <option value="water_leakage">Water Supply: Pipe Leakage</option>
+                    <option value="drainage">Drainage: Sewer Overflow</option>
+                    <option value="road_damage">Road: Pavement Damage</option>
                   </>
                 )}
               </Select>
@@ -401,6 +521,7 @@ export function ReportWizard({
               <span>Back</span>
             </Button>
             <Button
+              id="wizard-step2-next"
               variant="cta"
               onClick={() => {
                 if (!description.trim()) {
@@ -423,8 +544,16 @@ export function ReportWizard({
       {step === 3 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
-            <h2 style={{ fontSize: "1.25rem", margin: "0 0 0.25rem 0", color: "var(--text)" }}>
-              Attach Evidence Photo
+            <h2
+              className="display-text-sm"
+              style={{
+                fontSize: "clamp(1.25rem, 1rem + 1vw, 1.75rem)",
+                margin: "0 0 0.25rem 0",
+                color: "var(--text)",
+                lineHeight: 1.1,
+              }}
+            >
+              Attach evidence photo
             </h2>
             <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
               Photos will be compressed automatically before uploading to save mobile data
@@ -558,7 +687,12 @@ export function ReportWizard({
               <ArrowLeft size={15} strokeWidth={1.75} aria-hidden={true} />
               <span>Back</span>
             </Button>
-            <Button variant="cta" onClick={() => setStep(4)} style={{ minWidth: "120px" }}>
+            <Button
+              id="wizard-step3-next"
+              variant="cta"
+              onClick={() => setStep(4)}
+              style={{ minWidth: "120px" }}
+            >
               <span>Review Report</span>
               <ArrowRight size={15} strokeWidth={1.75} aria-hidden={true} />
             </Button>
@@ -566,224 +700,255 @@ export function ReportWizard({
         </div>
       )}
 
-      {/* STEP 4: REVIEW ON SIGN PLATE */}
-      {step === 4 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-          <div>
-            <h2 style={{ fontSize: "1.25rem", margin: "0 0 0.25rem 0", color: "var(--text)" }}>
-              Review Your Report
-            </h2>
-            <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
-              Check details before submitting to {tenant.name}
-            </p>
-          </div>
-
-          {/* SIGN PLATE CONTAINER: 2px inset border per DESIGN.md §2 */}
+      {/* STEP 4: REVIEW ON SIGN PLATE OR SUCCESS */}
+      {step === 4 &&
+        (submittedPublicId ? (
           <div
-            className="sign-plate"
-            style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
+            className="asphalt-band"
+            style={{
+              textAlign: "left",
+              padding: "2rem 1.5rem",
+              borderRadius: "var(--r-lg)",
+            }}
           >
-            <div
+            <IllustrationSuccess size={96} />
+            <h3
+              className="display-text-sm"
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "baseline",
-                borderBottom: "1px solid var(--border)",
-                paddingBottom: "0.75rem",
+                fontSize: "clamp(1.5rem, 1.25rem + 1vw, 2rem)",
+                margin: "1rem 0 0.5rem 0",
+                color: "var(--band-text)",
+                lineHeight: 1.1,
               }}
             >
-              <span
-                style={{
-                  fontSize: "0.8125rem",
-                  fontWeight: 600,
-                  color: "var(--text-subtle)",
-                  textTransform: "uppercase",
-                }}
-              >
-                Civic Report Summary
-              </span>
-              <span style={{ fontSize: "0.8125rem", color: "var(--text)", fontWeight: 600 }}>
-                {tenant.district || tenant.name}
-              </span>
-            </div>
-
-            <div>
-              <div
-                style={{ fontSize: "0.75rem", color: "var(--text-subtle)", marginBottom: "2px" }}
-              >
-                CATEGORY
-              </div>
-              <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>
-                {categoryDisplayName}
-              </div>
-            </div>
-
-            <div>
-              <div
-                style={{ fontSize: "0.75rem", color: "var(--text-subtle)", marginBottom: "2px" }}
-              >
-                LOCATION & LANDMARK
-              </div>
-              <div style={{ fontSize: "0.875rem", color: "var(--text)", fontWeight: 500 }}>
-                {landmark || "Coordinates pinned"} (lat: {coordinates.lat.toFixed(4)}, lon:{" "}
-                {coordinates.lon.toFixed(4)}){pincode ? ` — PIN: ${pincode}` : ""}
-              </div>
-            </div>
-
-            <div>
-              <div
-                style={{ fontSize: "0.75rem", color: "var(--text-subtle)", marginBottom: "2px" }}
-              >
-                DESCRIPTION
-              </div>
-              <p
-                style={{ margin: 0, fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.45 }}
-              >
-                {description || "No description specified"}
-              </p>
-            </div>
-
-            {photoResult && (
-              <div>
-                <div
-                  style={{ fontSize: "0.75rem", color: "var(--text-subtle)", marginBottom: "4px" }}
-                >
-                  ATTACHED EVIDENCE
-                </div>
-                <img
-                  src={photoResult.dataUrl}
-                  alt={`Evidence photo for ${categoryDisplayName}`}
-                  style={{
-                    maxHeight: "120px",
-                    maxWidth: "100%",
-                    borderRadius: "var(--r-sm)",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-              </div>
+              Report registered
+            </h3>
+            <p
+              style={{
+                margin: "0 0 1.5rem 0",
+                fontSize: "0.9375rem",
+                color: "var(--band-text-muted)",
+                lineHeight: 1.5,
+              }}
+            >
+              Your report ID is{" "}
+              <strong style={{ color: "var(--paint-400)" }}>{submittedPublicId}</strong>. It has
+              been routed to the relevant municipal department.
+            </p>
+            {onComplete && (
+              <Button variant="cta" onClick={onComplete}>
+                Back to issue map
+              </Button>
             )}
           </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            <div>
+              <h2
+                className="display-text-sm"
+                style={{
+                  fontSize: "clamp(1.25rem, 1rem + 1vw, 1.75rem)",
+                  margin: "0 0 0.25rem 0",
+                  color: "var(--text)",
+                  lineHeight: 1.1,
+                }}
+              >
+                Review your report
+              </h2>
+              <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
+                Check details before submitting to {tenant.name}
+              </p>
+            </div>
 
-          {/* DUPLICATE SUGGESTIONS WITH +1 OPTION */}
-          {duplicateSuggestions.length > 0 && (
-            <div
-              style={{
-                backgroundColor: "var(--surface-sunken)",
-                border: "1px solid var(--paint-300)",
-                borderRadius: "var(--r-md)",
-                padding: "1rem",
-              }}
-            >
+            {/* SIGN PLATE CONTAINER: 2px inset border per DESIGN.md §2 */}
+            <SignPlate label="Civic report summary" meta={tenant.district || tenant.name}>
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-subtle)",
+                    marginBottom: "2px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Category
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.375rem",
+                    fontSize: "1rem",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                  }}
+                >
+                  <CategoryIcon category={selectedCategory || "other"} size={18} />
+                  <span>{categoryDisplayName}</span>
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-subtle)",
+                    marginBottom: "2px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Location and landmark
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text)", fontWeight: 500 }}>
+                  {landmark || "Coordinates pinned"} (lat: {coordinates.lat.toFixed(4)}, lon:{" "}
+                  {coordinates.lon.toFixed(4)}){pincode ? ` — PIN: ${pincode}` : ""}
+                </div>
+              </div>
+
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-subtle)",
+                    marginBottom: "2px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Description
+                </div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "0.875rem",
+                    color: "var(--text)",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {description || "No description specified"}
+                </p>
+              </div>
+
+              {photoResult && (
+                <div>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--text-subtle)",
+                      marginBottom: "4px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Attached evidence
+                  </div>
+                  <img
+                    src={photoResult.dataUrl}
+                    alt={`Evidence photo for ${categoryDisplayName}`}
+                    style={{
+                      maxHeight: "120px",
+                      maxWidth: "100%",
+                      borderRadius: "var(--r-sm)",
+                      border: "1px solid var(--border)",
+                    }}
+                  />
+                </div>
+              )}
+            </SignPlate>
+
+            {/* DUPLICATE SUGGESTIONS WITH +1 OPTION */}
+            {duplicateSuggestions.length > 0 && (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.375rem",
-                  fontSize: "0.875rem",
-                  fontWeight: 700,
-                  color: "var(--text)",
-                  marginBottom: "0.5rem",
+                  backgroundColor: "var(--surface-sunken)",
+                  border: "1px solid var(--paint-300)",
+                  borderRadius: "var(--r-md)",
+                  padding: "1rem",
                 }}
               >
-                <AlertCircle size={15} strokeWidth={1.75} style={{ color: "var(--paint-600)" }} />
-                <span>Existing Similar Reports Found Nearby</span>
-              </div>
-              <p
-                style={{
-                  fontSize: "0.8125rem",
-                  color: "var(--text-muted)",
-                  margin: "0 0 0.75rem 0",
-                }}
-              >
-                Other citizens have already reported an issue nearby. You can add your confirmation
-                (+1) to elevate priority:
-              </p>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.375rem",
+                    fontSize: "0.875rem",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  <AlertCircle size={15} strokeWidth={1.75} style={{ color: "var(--paint-600)" }} />
+                  <span>Existing Similar Reports Found Nearby</span>
+                </div>
+                <p
+                  style={{
+                    fontSize: "0.8125rem",
+                    color: "var(--text-muted)",
+                    margin: "0 0 0.75rem 0",
+                  }}
+                >
+                  Other citizens have already reported an issue nearby. You can add your
+                  confirmation (+1) to elevate priority:
+                </p>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {duplicateSuggestions.map((dupe) => {
-                  const hasConfirmed = confirmedPlusOne.has(dupe.publicId);
-                  return (
-                    <div
-                      key={dupe.publicId}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "0.5rem 0.75rem",
-                        backgroundColor: "var(--surface)",
-                        borderRadius: "var(--r-sm)",
-                        border: "1px solid var(--border)",
-                      }}
-                    >
-                      <div>
-                        <span
-                          style={{ fontWeight: 700, fontSize: "0.8125rem", color: "var(--text)" }}
-                        >
-                          {dupe.publicId}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "0.75rem",
-                            color: "var(--text-muted)",
-                            marginLeft: "0.5rem",
-                          }}
-                        >
-                          Similarity: {(dupe.score.total * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <Button
-                        variant={hasConfirmed ? "secondary" : "cta"}
-                        size="sm"
-                        disabled={hasConfirmed}
-                        onClick={() => {
-                          void handlePlusOne(dupe.publicId);
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {duplicateSuggestions.map((dupe) => {
+                    const hasConfirmed = confirmedPlusOne.has(dupe.publicId);
+                    return (
+                      <div
+                        key={dupe.publicId}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "0.5rem 0.75rem",
+                          backgroundColor: "var(--surface)",
+                          borderRadius: "var(--r-sm)",
+                          border: "1px solid var(--border)",
                         }}
-                        style={{ height: "32px", padding: "0 0.625rem" }}
                       >
-                        {hasConfirmed ? (
-                          <>
-                            <CheckCircle2 size={13} strokeWidth={1.75} />
-                            <span>Confirmed (+1)</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus size={13} strokeWidth={1.75} />
-                            <span>+1 This Issue</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  );
-                })}
+                        <div>
+                          <span
+                            style={{ fontWeight: 700, fontSize: "0.8125rem", color: "var(--text)" }}
+                          >
+                            {dupe.publicId}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "0.75rem",
+                              color: "var(--text-muted)",
+                              marginLeft: "0.5rem",
+                            }}
+                          >
+                            Similarity: {(dupe.score.total * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <Button
+                          variant={hasConfirmed ? "secondary" : "cta"}
+                          size="sm"
+                          disabled={hasConfirmed}
+                          onClick={() => {
+                            void handlePlusOne(dupe.publicId);
+                          }}
+                          style={{ height: "32px", padding: "0 0.625rem" }}
+                        >
+                          {hasConfirmed ? (
+                            <>
+                              <CheckCircle2 size={13} strokeWidth={1.75} />
+                              <span>Confirmed (+1)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus size={13} strokeWidth={1.75} />
+                              <span>+1 This Issue</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {submittedPublicId ? (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "1.25rem",
-                backgroundColor: "var(--sign-50)",
-                border: "1px solid var(--sign-300)",
-                borderRadius: "var(--r-md)",
-                color: "var(--sign-800)",
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: "0.25rem" }}>
-                Report Registered Successfully
-              </div>
-              <p style={{ margin: "0 0 1rem 0", fontSize: "0.875rem" }}>
-                Your report ID is <strong>{submittedPublicId}</strong>. It has been routed to the
-                relevant municipal department.
-              </p>
-              {onComplete && (
-                <Button variant="primary" onClick={onComplete}>
-                  Back to Issue Map
-                </Button>
-              )}
-            </div>
-          ) : (
             <div
               style={{
                 display: "flex",
@@ -797,6 +962,7 @@ export function ReportWizard({
                 <span>Back</span>
               </Button>
               <Button
+                id="wizard-submit-btn"
                 variant="cta"
                 onClick={() => {
                   void handleSubmit();
@@ -808,9 +974,8 @@ export function ReportWizard({
                 <span>Submit Report</span>
               </Button>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        ))}
     </div>
   );
 }

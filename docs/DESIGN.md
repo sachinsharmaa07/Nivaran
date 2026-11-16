@@ -242,3 +242,13 @@ Recharts. Direct labels over legends. Palette order for series: asphalt-700, wat
 - All states in section 8 exist for new screens and components.
 - No hard-coded colors or durations (lint or grep check).
 - Self-critique note in the report: what one element carries the design, and what was cut.
+
+## 13. Milestone language
+
+Indian road signage and milestone stones on asphalt and road paint:
+
+- **Type**: Barlow Semi Condensed 600 and 700 for display, big and tight (display 56 to 72 px desktop, 40 px phones, line-height 1.0 to 1.05, letter-spacing -0.01em), left-aligned. Public Sans for UI and body at 16/24. Big numbers use tabular figures.
+- **Colour blocking**: Light by default (asphalt-50 page, white solid surfaces). Full-bleed asphalt-900 band per key screen (issue header, report success, dashboard header) carrying a large headline. Road-paint yellow only for the single primary action per screen. Signage green panels for resolved, kerb-red edge stripe for critical, signal orange for high.
+- **Milestone motif**: Small stone shape with rounded top, coloured cap and public ID or ward number on its face used on timeline nodes, map pins and the issue header. Dashed lane line connector between nodes. A node plants (drops 8 px and settles) on status change.
+- **Plates**: Inset-border sign plates for KPIs, review summary, and issue IDs. Tonal flat surfaces and 1 px hairlines elsewhere.
+- **Craft**: Hand-drawn inline SVG category icons (pothole, garbage, streetlight, water leak, drain, road damage, other) at 1.75 stroke. Hand-coded illustrations for empty state, success, and 404 based on milestone, lane lines and manholes. Calmed map tiles via CSS filter.

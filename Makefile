@@ -70,6 +70,12 @@ test: node_modules
 	docker run --rm $(AI_TEST_IMAGE) pytest
 	@echo "==> Test: OK"
 
+.PHONY: contrast
+contrast:
+	@echo "==> WCAG 2.2 AA Contrast Checks..."
+	node scripts/contrast-check.mjs
+	@echo "==> Contrast: OK"
+
 .PHONY: build
 build:
 	@echo "==> Building all Docker images..."
@@ -86,6 +92,19 @@ seed: node_modules
 	pnpm --filter @nivaran/api run build
 	node --env-file=.env apps/api/dist/db/seed.js
 	@echo "==> Seed: OK"
+
+.PHONY: seed-prod
+seed-prod: node_modules
+	@echo "==> Running production bootstrap seed..."
+	pnpm --filter @nivaran/api run build
+	node --env-file=$${ENV_FILE:-infra/prod/.env.prod} apps/api/dist/db/seed-prod.js
+	@echo "==> seed-prod: OK"
+
+.PHONY: prod-smoke
+prod-smoke:
+	@echo "==> Running production smoke test..."
+	node scripts/prod-smoke.mjs
+	@echo "==> prod-smoke: OK"
 
 .PHONY: eval-dedup
 eval-dedup: node_modules

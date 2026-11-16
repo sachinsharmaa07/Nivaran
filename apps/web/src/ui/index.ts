@@ -13,3 +13,7 @@ export * from "./EmptyState.js";
 export * from "./ErrorState.js";
 export * from "./LaneLine.js";
 export * from "./AppShell.js";
+export * from "./Milestone.js";
+export * from "./SignPlate.js";
+export * from "./CategoryIcon.js";
+export * from "./Illustrations.js";

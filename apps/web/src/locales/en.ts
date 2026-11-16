@@ -1,5 +1,5 @@
 const en = {
-  app_title: "Nivaran",
+  app_title: "CivicPulse",
   app_tagline: "Civic Issue Reporting & Resolution Platform",
   city_picker_title: "Select Your City / Municipality",
   city_picker_subtitle: "Please select your state and municipality to continue",

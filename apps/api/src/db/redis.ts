@@ -1,5 +1,6 @@
 import net from "node:net";
 import fs from "node:fs";
+import { Redis } from "ioredis";
 
 let redisConfigOverride: { host: string; port: number } | null = null;
 
@@ -118,5 +119,55 @@ export async function resetRedisRateLimits(): Promise<void> {
     });
   } catch {
     // ignore
+  }
+}
+
+let ioredisClient: Redis | null = null;
+
+export function getRedisClient(): Redis {
+  if (!ioredisClient) {
+    const { host, port } = getRedisConfig();
+    ioredisClient = new Redis({
+      host,
+      port,
+      maxRetriesPerRequest: null,
+      lazyConnect: false,
+      retryStrategy: () => null, // don't loop endlessly if redis is down
+    });
+    ioredisClient.on("error", () => {
+      // suppress unhandled errors
+    });
+  }
+  return ioredisClient;
+}
+
+export async function cacheGet<T>(key: string): Promise<T | null> {
+  try {
+    const client = getRedisClient();
+    const val = await client.get(key);
+    return val ? (JSON.parse(val) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function cacheSet(key: string, value: unknown, ttlSeconds = 60): Promise<void> {
+  try {
+    const client = getRedisClient();
+    await client.set(key, JSON.stringify(value), "EX", ttlSeconds);
+  } catch {
+    // fail open
+  }
+}
+
+export async function cacheInvalidateTenantPosts(tenantId: string): Promise<void> {
+  try {
+    const client = getRedisClient();
+    const keys = await client.keys(`cache:posts:${tenantId}:*`);
+    if (keys.length > 0) {
+      await client.del(...keys);
+    }
+  } catch {
+    // fail open
   }
 }

@@ -1,0 +1,209 @@
+# CivicPulse Production Docker Compose
+# Single-host production deployment behind Caddy reverse proxy on AWS EC2 (t3.small: 2 vCPU, 2 GB RAM)
+# Only Caddy exposes ports 80/443; all other services communicate on the internal docker network
+
+x-common-logging: &common-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2.9-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:80/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 64M
+    logging: *common-logging
+
+  postgres:
+    image: imresamu/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nivaran
+      POSTGRES_USER: nivaran_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../compose/pg-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nivaran_owner -d nivaran"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+    logging: *common-logging
+
+  mongo:
+    image: mongo:8.0.4
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: >
+        mongosh --quiet --eval
+        "try { rs.status().ok } catch(e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }"
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+    logging: *common-logging
+
+  redis:
+    image: redis:7.4.3-alpine3.21
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+    logging: *common-logging
+
+  api:
+    image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.prod.example}
+    environment:
+      NODE_ENV: production
+      IN_DOCKER: "1"
+      PORT: "4000"
+      TRUST_PROXY: "1"
+      DOMAIN: ${DOMAIN:-localhost}
+      WEB_ORIGIN: https://${DOMAIN:-localhost}
+      API_BASE_URL: https://${DOMAIN:-localhost}/api/v1
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:4000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+    logging: *common-logging
+
+  worker:
+    image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.prod.example}
+    environment:
+      NODE_ENV: production
+      IN_DOCKER: "1"
+    command: ["node", "dist/worker.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'dist/worker.js' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      mongo:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging: *common-logging
+
+  web:
+    image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:5173/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+    logging: *common-logging
+
+  ai:
+    image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-ai:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.prod.example}
+    environment:
+      NODE_ENV: production
+      PORT: "8000"
+    healthcheck:
+      test: >
+        python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging: *common-logging
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:

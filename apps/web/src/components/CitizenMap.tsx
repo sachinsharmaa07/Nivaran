@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { milestonePinHtml } from "../ui/Milestone.js";
 
 export interface MapPin {
   publicId: string;
@@ -10,6 +11,7 @@ export interface MapPin {
   description: string;
   priorityScore?: number | undefined;
   priorityLevel?: string | undefined;
+  upvoteCount?: number | undefined;
 }
 
 export function CitizenMap({
@@ -53,6 +55,7 @@ export function CitizenMap({
         });
 
         // OpenStreetMap raster tiles with required attribution per DESIGN.md §10
+        // Map tiles are calmed via CSS filter on .leaflet-tile-pane in tokens.css
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -121,7 +124,7 @@ export function CitizenMap({
     }
   }, [pickMode, center.lat, center.lon]);
 
-  // Render issue pins: colour by priority, shape by category, outline by status per DESIGN.md §10
+  // Render milestone pins: coloured cap by status, white halo body
   useEffect(() => {
     const L = leafletRef.current;
     if (!markersLayerRef.current || !L) return;
@@ -131,65 +134,39 @@ export function CitizenMap({
     pins.forEach((pin) => {
       const isSelected = pin.publicId === selectedPinId;
 
-      // Priority colour
-      let priorityColor = "#6c7772"; // low: asphalt-500
+      // Priority colour for popup reference
+      let priorityColor = "#6c7772";
       const score = pin.priorityScore ?? 25;
       if (score >= 80 || pin.priorityLevel === "critical") {
-        priorityColor = "#d13f34"; // critical: kerb-500
+        priorityColor = "#d13f34";
       } else if (score >= 60 || pin.priorityLevel === "high") {
-        priorityColor = "#e8761a"; // high: signal-500
+        priorityColor = "#e8761a";
       } else if (score >= 35 || pin.priorityLevel === "medium") {
-        priorityColor = "#d9a800"; // medium: paint-500
+        priorityColor = "#d9a800";
       }
 
-      // Status outline
-      let statusOutline = "2px solid #ffffff";
-      if (pin.status === "resolved") {
-        statusOutline = "3px solid #1e9460";
-      } else if (pin.status === "in_progress") {
-        statusOutline = "3px solid #f2c21b";
-      } else if (pin.status === "reopened") {
-        statusOutline = "3px solid #b3322a";
-      }
+      // Extract short label from publicId (last 3 chars)
+      const shortLabel = pin.publicId.slice(-3);
 
-      // Shape by category
-      const cat = (pin.categoryCode || "").toLowerCase();
-      let borderRadius = "50%"; // default circle for roads / general
-      let transform = "none";
-      if (cat.includes("waste") || cat.includes("garbage") || cat.includes("sanitation")) {
-        borderRadius = "3px"; // square for waste
-      } else if (cat.includes("water") || cat.includes("drainage") || cat.includes("sewage")) {
-        borderRadius = "50% 50% 50% 0";
-        transform = "rotate(-45deg)";
-      } else if (cat.includes("light") || cat.includes("electric")) {
-        borderRadius = "8px 0px 8px 0px";
-      }
+      const pinHtml = milestonePinHtml(shortLabel, pin.status, priorityColor);
 
-      const size = isSelected ? 26 : 20;
-
+      const size = isSelected ? 34 : 30;
       const icon = L.divIcon({
-        className: "custom-issue-marker",
-        html: `<div style="
-          width: ${size}px;
-          height: ${size}px;
-          background: ${priorityColor};
-          border: ${statusOutline};
-          border-radius: ${borderRadius};
-          transform: ${transform};
-          box-shadow: 0 2px 6px rgba(14,17,16,0.3);
-          cursor: pointer;
-          transition: transform 0.15s ease;
-        "></div>`,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+        className: "milestone-map-pin",
+        html: pinHtml,
+        iconSize: [size, size + 3],
+        iconAnchor: [size / 2, size + 3],
       });
 
       const marker = L.marker([pin.lat, pin.lon], { icon }).addTo(layer);
 
       marker.bindPopup(`
         <div style="font-family: var(--font-body); max-width: 220px; padding: 2px;">
-          <div style="font-weight: 700; font-size: 0.8125rem; color: #171b1a; font-variant-numeric: tabular-nums;">
-            ${pin.publicId}
+          <div style="font-weight: 700; font-size: 0.8125rem; color: #171b1a; font-variant-numeric: tabular-nums; display: flex; justify-content: space-between; align-items: center;">
+            <span>${pin.publicId}</span>
+            <span style="font-size: 0.6875rem; background: #e8f5e9; padding: 1px 5px; border-radius: 4px; color: #1b5e20; font-weight: 700;">
+              ▲ ${pin.upvoteCount ?? 1} Upvotes
+            </span>
           </div>
           <div style="font-size: 0.8125rem; font-weight: 600; color: #4f5954; margin: 2px 0 4px 0;">
             ${pin.categoryName || pin.categoryCode}

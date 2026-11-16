@@ -244,7 +244,7 @@ async function sendEmailWithRetry(
         to,
         subject,
         text,
-        headers: { "X-Nivaran-Notification": notificationId },
+        headers: { "X-CivicPulse-Notification": notificationId },
       });
 
       await Notification.findByIdAndUpdate(notificationId, {

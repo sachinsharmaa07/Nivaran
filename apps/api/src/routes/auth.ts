@@ -27,6 +27,42 @@ const REFRESH_COOKIE_NAME = "refreshToken";
 const REFRESH_TTL_DAYS = Number(process.env["REFRESH_TTL_DAYS"] ?? "14");
 const REFRESH_COOKIE_MAX_AGE = REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
+export function cleanToken(s?: string): string {
+  if (!s) return "";
+  let res = s.trim();
+  if (res.startsWith('"') && res.endsWith('"') && res.length >= 2) {
+    res = res.slice(1, -1).trim();
+  }
+  try {
+    res = decodeURIComponent(res);
+  } catch {
+    // keep as is
+  }
+  res = res.trim();
+  if (res.startsWith('"') && res.endsWith('"') && res.length >= 2) {
+    res = res.slice(1, -1).trim();
+  }
+  return res;
+}
+
+export function getAllCookieValues(header?: string, name?: string): string[] {
+  if (!header || !name) return [];
+  const results: string[] = [];
+  const pairs = header.split(";");
+  for (const pair of pairs) {
+    const eqIdx = pair.indexOf("=");
+    if (eqIdx === -1) continue;
+    const cookieName = pair.slice(0, eqIdx).trim();
+    if (cookieName !== name) continue;
+    const rawVal = pair.slice(eqIdx + 1);
+    const cleaned = cleanToken(rawVal);
+    if (cleaned) {
+      results.push(cleaned);
+    }
+  }
+  return results;
+}
+
 export function parseCookies(header?: string): Record<string, string> {
   if (!header) return {};
   const list: Record<string, string> = {};
@@ -41,10 +77,19 @@ export function parseCookies(header?: string): Record<string, string> {
       val = val.slice(1, -1);
     }
     try {
-      list[name] = decodeURIComponent(val);
+      val = decodeURIComponent(val);
     } catch {
-      list[name] = val;
+      // keep as is
     }
+    val = val.trim();
+    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+      val = val.slice(1, -1).trim();
+    }
+    // Prevent Google GIS prompt cookies (e.g. {"i_l":0}) from overwriting our auth state token
+    if (name === "g_state" && list[name] && val.startsWith("{")) {
+      continue;
+    }
+    list[name] = val;
   }
   return list;
 }
@@ -95,18 +140,24 @@ export function setOAuthCookies(
   const options = getOAuthCookieOptions(req);
   res.cookie("g_verifier", verifier, options);
   res.cookie("g_state", state, options);
+  res.cookie("g_oauth_state", state, options);
 }
 
 export function clearOAuthCookies(res: Response, req?: Request): void {
   const options = getOAuthCookieOptions(req);
-  const clearOptions = {
-    httpOnly: options.httpOnly,
-    sameSite: options.sameSite,
-    path: options.path,
-    secure: options.secure,
-  };
-  res.clearCookie("g_verifier", clearOptions);
-  res.clearCookie("g_state", clearOptions);
+  const paths = [options.path, "/", "/api"];
+  const uniquePaths = Array.from(new Set(paths));
+  for (const p of uniquePaths) {
+    const clearOptions = {
+      httpOnly: options.httpOnly,
+      sameSite: options.sameSite,
+      path: p,
+      secure: options.secure,
+    };
+    res.clearCookie("g_verifier", clearOptions);
+    res.clearCookie("g_state", clearOptions);
+    res.clearCookie("g_oauth_state", clearOptions);
+  }
 }
 
 // ── Register ─────────────────────────────────────────────────────────────────
@@ -196,13 +247,26 @@ authRouter.post("/register", authRateLimiter("register"), async (req: Request, r
 authRouter.post("/login", authRateLimiter("login"), async (req: Request, res: Response) => {
   const input = loginSchema.parse(req.body);
 
-  const tenant = await platformDb.getTenantBySlug(input.tenantSlug);
+  let tenant = await platformDb.getTenantBySlug(input.tenantSlug);
   if (!tenant) {
     throw new AppError("TENANT_NOT_FOUND", `Tenant '${input.tenantSlug}' does not exist`, 404);
   }
 
-  const tenantDb = new TenantDb(tenant.id);
-  const user = await tenantDb.findUserByIdentifier(input.identifier);
+  let tenantDb = new TenantDb(tenant.id);
+  let user = await tenantDb.findUserByIdentifier(input.identifier);
+
+  if (!user) {
+    // If not found in current city/tenant, auto-resolve user's registered tenant
+    const crossTenantId = await platformDb.findTenantIdByUserIdentifier(input.identifier);
+    if (crossTenantId) {
+      const resolvedTenant = await platformDb.getTenantById(crossTenantId);
+      if (resolvedTenant) {
+        tenant = resolvedTenant;
+        tenantDb = new TenantDb(tenant.id);
+        user = await tenantDb.findUserByIdentifier(input.identifier);
+      }
+    }
+  }
 
   if (!user) {
     throw new AppError("INVALID_CREDENTIALS", "Invalid email/phone or password", 401);
@@ -253,6 +317,7 @@ authRouter.post("/login", authRateLimiter("login"), async (req: Request, res: Re
         roles: user.roles,
         locale: user.locale,
         tenantId: tenant.id,
+        tenantSlug: tenant.slug,
       },
       accessToken,
     },
@@ -314,26 +379,35 @@ authRouter.get("/google/callback", async (req: Request, res: Response) => {
   const cookies = parseCookies(req.headers.cookie);
   clearOAuthCookies(res, req);
 
-  const stateParam = typeof req.query["state"] === "string" ? req.query["state"] : undefined;
-  const code = typeof req.query["code"] === "string" ? req.query["code"] : undefined;
+  const rawStateParam = typeof req.query["state"] === "string" ? req.query["state"] : undefined;
+  const rawCode = typeof req.query["code"] === "string" ? req.query["code"] : undefined;
 
-  if (!stateParam) {
+  if (!rawStateParam) {
     console.warn("[OAuth] State parameter missing");
     throw new AppError("INVALID_STATE", "OAuth state parameter missing", 400);
   }
-  if (!code) {
+  if (!rawCode) {
     console.warn("[OAuth] Authorization code missing");
     throw new AppError("INVALID_CODE", "Authorization code missing", 400);
   }
 
-  const verifier = cookies["g_verifier"];
-  if (!verifier) {
-    console.warn("[OAuth] PKCE code verifier cookie missing");
-    throw new AppError("INVALID_PKCE", "PKCE code verifier cookie missing", 400);
-  }
+  const stateParam = cleanToken(rawStateParam);
+  const code = rawCode.trim();
 
-  const stateCookie = cookies["g_state"];
-  if (!stateCookie) {
+  // Collect all state cookie candidates across g_oauth_state and g_state
+  const allStateValues = [
+    ...getAllCookieValues(req.headers.cookie, "g_oauth_state"),
+    ...getAllCookieValues(req.headers.cookie, "g_state"),
+  ];
+  if (cookies["g_oauth_state"]) allStateValues.push(cleanToken(cookies["g_oauth_state"]));
+  if (cookies["g_state"]) allStateValues.push(cleanToken(cookies["g_state"]));
+
+  // Filter out any GIS client cookies like {"i_l":0}
+  const candidateStates = Array.from(new Set(allStateValues)).filter(
+    (val) => Boolean(val) && !val.startsWith("{")
+  );
+
+  if (candidateStates.length === 0) {
     console.warn("[OAuth] State cookie missing");
     throw new AppError(
       "STATE_COOKIE_MISSING",
@@ -342,10 +416,33 @@ authRouter.get("/google/callback", async (req: Request, res: Response) => {
     );
   }
 
-  if (!constantTimeCompare(stateCookie, stateParam)) {
+  let matchedIndex = -1;
+  for (let i = 0; i < candidateStates.length; i++) {
+    const candidate = candidateStates[i]!;
+    if (constantTimeCompare(candidate, stateParam)) {
+      matchedIndex = i;
+      break;
+    }
+  }
+
+  if (matchedIndex === -1) {
     console.warn("[OAuth] State mismatch");
     throw new AppError("STATE_MISMATCH", "OAuth state mismatch", 400);
   }
+
+  const verifierValues = getAllCookieValues(req.headers.cookie, "g_verifier");
+  if (cookies["g_verifier"]) verifierValues.push(cleanToken(cookies["g_verifier"]));
+  const candidateVerifiers = Array.from(new Set(verifierValues)).filter(Boolean);
+
+  if (candidateVerifiers.length === 0) {
+    console.warn("[OAuth] PKCE code verifier cookie missing");
+    throw new AppError("INVALID_PKCE", "PKCE code verifier cookie missing", 400);
+  }
+
+  const verifier =
+    (matchedIndex >= 0 && candidateVerifiers[matchedIndex]) ||
+    candidateVerifiers[candidateVerifiers.length - 1] ||
+    candidateVerifiers[0]!;
 
   let statePayload: { nonce: string; tenantSlug: string };
   try {

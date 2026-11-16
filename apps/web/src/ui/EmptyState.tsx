@@ -1,5 +1,5 @@
 import React, { type ReactNode } from "react";
-import { Inbox } from "lucide-react";
+import { IllustrationEmptyList } from "./Illustrations.js";
 
 export interface EmptyStateProps {
   title: string;
@@ -27,9 +27,8 @@ export function EmptyState({
       style={{
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        textAlign: "center",
+        alignItems: "flex-start",
+        textAlign: "left",
         padding: "2.5rem 1.5rem",
         backgroundColor: "var(--surface)",
         border: "1px dashed var(--border)",
@@ -38,22 +37,7 @@ export function EmptyState({
         ...style,
       }}
     >
-      <div
-        style={{
-          width: "44px",
-          height: "44px",
-          borderRadius: "var(--r-md)",
-          backgroundColor: "var(--surface-sunken)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--text-subtle)",
-          border: "1px solid var(--border)",
-        }}
-        aria-hidden="true"
-      >
-        {icon || <Inbox size={22} strokeWidth={1.75} />}
-      </div>
+      <div aria-hidden="true">{icon || <IllustrationEmptyList size={96} />}</div>
 
       <div style={{ maxWidth: "380px" }}>
         <h3

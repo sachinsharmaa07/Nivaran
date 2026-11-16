@@ -115,6 +115,11 @@
     --focus-inner: light-dark(var(--asphalt-900), var(--asphalt-100));
     --focus-outer: var(--paint-400);
 
+    /* Asphalt band: full-bleed dark header band */
+    --band-bg: var(--asphalt-900);
+    --band-text: var(--asphalt-0);
+    --band-text-muted: var(--asphalt-400);
+
     /* Radius hierarchy */
     --r-sm: 4px;
     --r-md: 8px;
@@ -228,6 +233,9 @@
       --link: var(--water-300);
       --focus-inner: var(--asphalt-100);
       --focus-outer: var(--paint-400);
+      --band-bg: var(--asphalt-950);
+      --band-text: var(--asphalt-100);
+      --band-text-muted: var(--asphalt-400);
     }
   }
 }
@@ -293,11 +301,49 @@
     .lane-travel {
       animation: none !important;
     }
+    .milestone-plant {
+      animation: none !important;
+    }
   }
 }
 
 @layer components {
-  /* Sign plate: panel with 2px inset border line */
+  /* ═══ DISPLAY TEXT: big, tight Barlow ═══ */
+  .display-text {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+    font-size: clamp(2.5rem, 2rem + 2vw, 4.5rem);
+  }
+
+  .display-text-sm {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+    font-size: clamp(2rem, 1.5rem + 1.5vw, 3.5rem);
+  }
+
+  /* ═══ ASPHALT BAND: full-bleed dark header ═══ */
+  .asphalt-band {
+    background-color: var(--band-bg);
+    color: var(--band-text);
+    padding: var(--sp-8) var(--sp-4);
+    position: relative;
+  }
+
+  .asphalt-band .display-text,
+  .asphalt-band .display-text-sm,
+  .asphalt-band h1 {
+    color: var(--band-text);
+  }
+
+  .asphalt-band .text-muted {
+    color: var(--band-text-muted);
+  }
+
+  /* ═══ Sign plate: panel with 2px inset border line ═══ */
   .sign-plate {
     background-color: var(--surface);
     border-radius: var(--r-lg);
@@ -305,6 +351,113 @@
     outline: 2px solid var(--border);
     outline-offset: -6px;
     padding: var(--sp-4);
+  }
+
+  /* ═══ MILESTONE MARKER: stone shape with rounded top and coloured cap ═══ */
+  .milestone-marker {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    width: 32px;
+    position: relative;
+  }
+
+  .milestone-marker-cap {
+    width: 28px;
+    height: 12px;
+    border-radius: 14px 14px 0 0;
+    background-color: var(--asphalt-500);
+  }
+
+  .milestone-marker-body {
+    width: 28px;
+    min-height: 28px;
+    background-color: var(--surface);
+    border: 2px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 2px 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--text);
+    padding: 2px;
+  }
+
+  /* Cap colour variants */
+  .milestone-marker[data-status="submitted"] .milestone-marker-cap {
+    background-color: var(--asphalt-500);
+  }
+  .milestone-marker[data-status="triaged"] .milestone-marker-cap,
+  .milestone-marker[data-status="assigned"] .milestone-marker-cap {
+    background-color: var(--water-500);
+  }
+  .milestone-marker[data-status="in_progress"] .milestone-marker-cap {
+    background-color: var(--paint-400);
+  }
+  .milestone-marker[data-status="resolved"] .milestone-marker-cap {
+    background-color: var(--sign-500);
+  }
+  .milestone-marker[data-status="closed"] .milestone-marker-cap {
+    background-color: var(--asphalt-700);
+  }
+  .milestone-marker[data-status="reopened"] .milestone-marker-cap {
+    background-color: var(--kerb-500);
+  }
+
+  /* Milestone plant animation: drops 8px and settles */
+  @keyframes milestonePlant {
+    0% {
+      transform: translateY(-8px);
+      opacity: 0;
+    }
+    60% {
+      transform: translateY(2px);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .milestone-plant {
+    animation: milestonePlant var(--dur-base) var(--ease-out) both;
+  }
+
+  /* Map pin milestone: smaller for map use with white halo */
+  .milestone-pin {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    filter: drop-shadow(0 2px 4px rgba(14, 17, 16, 0.3));
+  }
+
+  .milestone-pin-cap {
+    width: 20px;
+    height: 8px;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .milestone-pin-body {
+    width: 20px;
+    height: 20px;
+    background-color: var(--asphalt-0);
+    border: 2px solid var(--asphalt-200);
+    border-top: none;
+    border-radius: 0 0 2px 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.5rem;
+    line-height: 1;
+    color: var(--asphalt-900);
   }
 
   /* Hazard stripe for SLA breaches */
@@ -431,6 +584,35 @@
   .form-field:has(textarea:invalid:not(:placeholder-shown)) {
     --field-border: var(--kerb-500);
   }
+
+  /* Button press state */
+  .btn-press:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  /* ═══ MAP CALM: desaturate tile layer so pins stand out ═══ */
+  .leaflet-tile-pane {
+    filter: saturate(0.55) contrast(0.92) brightness(1.02);
+  }
+
+  /* ═══ KPI big number display face ═══ */
+  .kpi-number {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    font-size: clamp(2rem, 1.5rem + 2vw, 3rem);
+  }
+
+  /* ═══ LANE-LINE CONNECTOR: dashed line for timelines ═══ */
+  .lane-connector {
+    border-left: 2px dashed var(--border);
+  }
+
+  .lane-connector-completed {
+    border-left: 2px dashed var(--sign-500);
+  }
 }
 
 @layer utilities {
@@ -456,5 +638,23 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+
+  .content-max {
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  .text-left {
+    text-align: left;
+  }
+
+  @media (max-width: 640px) {
+    .nav-label {
+      display: none;
+    }
   }
 }

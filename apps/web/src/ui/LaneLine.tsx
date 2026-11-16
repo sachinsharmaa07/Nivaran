@@ -280,3 +280,28 @@ export function LaneTimeline({
     </div>
   );
 }
+
+export function LaneLine({
+  width = "100%",
+  color = "var(--border)",
+  className = "",
+  style,
+}: {
+  width?: string | number;
+  color?: string;
+  className?: string;
+  style?: React.CSSProperties;
+}): React.JSX.Element {
+  return (
+    <div
+      className={`lane-line-divider ${className}`}
+      style={{
+        width,
+        height: "2px",
+        borderTop: `2px dashed ${color}`,
+        margin: "1rem 0",
+        ...style,
+      }}
+    />
+  );
+}

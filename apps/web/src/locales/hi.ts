@@ -1,5 +1,5 @@
 const hi = {
-  app_title: "निवारण",
+  app_title: "सिविकपल्स (CivicPulse)",
   app_tagline: "नागरिक समस्या रिपोर्टिंग और समाधान मंच",
   city_picker_title: "अपना शहर / नगरपालिका चुनें",
   city_picker_subtitle: "जारी रखने के लिए कृपया अपना राज्य और नगरपालिका चुनें",

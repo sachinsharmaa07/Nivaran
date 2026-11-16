@@ -1,6 +1,6 @@
 import React, { forwardRef, type ButtonHTMLAttributes } from "react";
 
-export type ButtonVariant = "cta" | "primary" | "secondary" | "ghost" | "danger";
+export type ButtonVariant = "cta" | "primary" | "secondary" | "ghost" | "danger" | "outline";
 export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -54,6 +54,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
           border: "1px solid transparent",
           fontWeight: 500,
         };
+      case "outline":
       case "secondary":
       default:
         return {

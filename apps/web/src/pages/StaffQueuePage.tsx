@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSearchParams, Link } from "react-router";
-import { Inbox, Map as MapIcon, Users, Settings, Search, X } from "lucide-react";
+import { Inbox, Map as MapIcon, Users, Settings, Search, X, AlertTriangle } from "lucide-react";
 import { useTranslation } from "../utils/i18n.js";
 import { useAuth } from "../utils/authContext.js";
 import type { TenantInfo } from "../components/CityPicker.js";
@@ -14,6 +14,9 @@ import {
   Skeleton,
   EmptyState,
   ErrorState,
+  CategoryIcon,
+  Milestone,
+  SignPlate,
   useToast,
 } from "../ui/index.js";
 
@@ -83,6 +86,18 @@ interface Ward {
   name: string;
 }
 
+interface DepartmentMetric {
+  department_id: string;
+  department_code: string;
+  department_name: string;
+  metrics: {
+    total_issues: number;
+    open_count: number | string;
+    median_resolution_hours: number | string;
+    sla_compliance_pct: number | string;
+  };
+}
+
 // State machine allowed transitions for staff
 const ALLOWED_STAFF_TRANSITIONS: Record<string, string[]> = {
   submitted: ["triaged", "in_progress", "rejected", "duplicate"],
@@ -102,7 +117,8 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Filters from URL search params
+  // Filters and views from URL search params
+  const viewMode = searchParams.get("view") || "queue"; // "queue" | "team"
   const statusFilter = searchParams.get("status") || "";
   const deptFilter = searchParams.get("dept") || "";
   const wardFilter = searchParams.get("ward") || "";
@@ -112,6 +128,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
   const [issues, setIssues] = useState<IssueItem[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wards, setWards] = useState<Ward[]>([]);
+  const [deptMetrics, setDeptMetrics] = useState<DepartmentMetric[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [flashingIssueId, setFlashingIssueId] = useState<string | null>(null);
@@ -137,6 +154,16 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
       next.set(key, value);
     } else {
       next.delete(key);
+    }
+    setSearchParams(next);
+  };
+
+  const setView = (view: "queue" | "team") => {
+    const next = new URLSearchParams(searchParams);
+    if (view === "queue") {
+      next.delete("view");
+    } else {
+      next.set("view", "team");
     }
     setSearchParams(next);
   };
@@ -196,7 +223,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
     }
   };
 
-  // Load departments and wards for filters
+  // Load departments, wards, and team workload metrics
   useEffect(() => {
     authFetch("/api/v1/admin/departments")
       .then((r) => (r.ok ? r.json() : null))
@@ -211,7 +238,16 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
         if (data?.data) setWards(data.data);
       })
       .catch(() => undefined);
-  }, [tenant.id]);
+
+    fetch(`/api/v1/public/${tenant.slug}/metrics`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { data?: { by_department?: DepartmentMetric[] } } | null) => {
+        if (data?.data?.by_department) {
+          setDeptMetrics(data.data.by_department);
+        }
+      })
+      .catch(() => undefined);
+  }, [tenant.id, tenant.slug]);
 
   useEffect(() => {
     void fetchIssues();
@@ -431,6 +467,22 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
     }
   };
 
+  const getWardCode = (wardId?: string): string => {
+    if (!wardId) return "W1";
+    const found = wards.find((w) => w.id === wardId);
+    if (found?.ward_number) {
+      return found.ward_number.replace(/^W0?/, "W");
+    }
+    return "W1";
+  };
+
+  const getWardDisplayName = (wardId?: string): string => {
+    if (!wardId) return "Ward —";
+    const found = wards.find((w) => w.id === wardId);
+    if (found) return `Ward ${found.ward_number}: ${found.name}`;
+    return "Ward —";
+  };
+
   // Format time remaining until SLA deadline
   const formatSlaRemaining = (issue: IssueItem): { text: string; breached: boolean } => {
     if (!issue.slaPolicy?.resolveBy && !issue.slaPolicy?.resolveHours) {
@@ -447,10 +499,10 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
       return { text: `Overdue by ${overdueH}h`, breached: true };
     }
     if (diffHours < 24) {
-      return { text: `${Math.round(diffHours)}h remaining`, breached: false };
+      return { text: `${Math.round(diffHours)}h left`, breached: false };
     }
     const days = Math.round(diffHours / 24);
-    return { text: `${days}d remaining`, breached: false };
+    return { text: `${days}d left`, breached: false };
   };
 
   const allowedMoves = selectedIssue ? ALLOWED_STAFF_TRANSITIONS[selectedIssue.status] || [] : [];
@@ -478,7 +530,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
           flex-direction: column;
           align-items: center;
           padding: 1rem 0;
-          gap: 1.25rem;
+          gap: 1rem;
           flex-shrink: 0;
         }
         .staff-content-area {
@@ -497,7 +549,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
           min-width: 0;
         }
         .staff-detail-panel {
-          width: 420px;
+          width: 440px;
           border-left: 1px solid var(--border);
           background-color: var(--surface-raised);
           overflow-y: auto;
@@ -508,13 +560,16 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
           flex-shrink: 0;
           transition: width var(--dur-base) var(--ease-out);
         }
+        .queue-table tbody tr {
+          transition: background-color var(--dur-fast) var(--ease-out);
+        }
         @media (max-width: 1024px) {
           .staff-detail-panel {
             position: fixed;
             top: 56px;
             right: 0;
             bottom: 0;
-            width: min(100vw, 420px);
+            width: min(100vw, 440px);
             z-index: 50;
             box-shadow: var(--shadow-overlay);
           }
@@ -554,26 +609,51 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
         }
       `}</style>
 
-      {/* 1. Left Rail (Queue, Map, Team, Admin) */}
+      {/* 1. Left Rail (Queue, Map, Team Workload, Admin) */}
       <aside className="staff-left-rail" aria-label="Staff Navigation Rail">
-        <Link
-          to="/queue"
+        <button
+          type="button"
+          onClick={() => setView("queue")}
           className="touch-target"
           style={{
             width: "44px",
             height: "44px",
             borderRadius: "var(--r-md)",
-            backgroundColor: "var(--surface-sunken)",
-            color: "var(--primary)",
+            backgroundColor: viewMode === "queue" ? "var(--asphalt-900)" : "transparent",
+            color: viewMode === "queue" ? "var(--paint-400)" : "var(--text-muted)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            border: "1px solid var(--border)",
+            border: viewMode === "queue" ? "1px solid var(--asphalt-700)" : "1px solid transparent",
+            cursor: "pointer",
           }}
-          title="Queue"
+          title="Operational Queue"
+          aria-label="Operational Queue"
         >
-          <Inbox size={20} strokeWidth={1.75} aria-hidden={true} />
-        </Link>
+          <Inbox size={20} strokeWidth={2} aria-hidden={true} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setView("team")}
+          className="touch-target"
+          style={{
+            width: "44px",
+            height: "44px",
+            borderRadius: "var(--r-md)",
+            backgroundColor: viewMode === "team" ? "var(--asphalt-900)" : "transparent",
+            color: viewMode === "team" ? "var(--paint-400)" : "var(--text-muted)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: viewMode === "team" ? "1px solid var(--asphalt-700)" : "1px solid transparent",
+            cursor: "pointer",
+          }}
+          title="Team Workload View"
+          aria-label="Team Workload View"
+        >
+          <Users size={20} strokeWidth={2} aria-hidden={true} />
+        </button>
 
         <Link
           to="/"
@@ -587,26 +667,10 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
             alignItems: "center",
             justifyContent: "center",
           }}
-          title="Map"
+          title="Citizen Map"
+          aria-label="Citizen Map"
         >
           <MapIcon size={20} strokeWidth={1.75} aria-hidden={true} />
-        </Link>
-
-        <Link
-          to="/admin?tab=staff"
-          className="touch-target"
-          style={{
-            width: "44px",
-            height: "44px",
-            borderRadius: "var(--r-md)",
-            color: "var(--text-muted)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          title="Team & Staff"
-        >
-          <Users size={20} strokeWidth={1.75} aria-hidden={true} />
         </Link>
 
         <Link
@@ -621,307 +685,573 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
             alignItems: "center",
             justifyContent: "center",
           }}
-          title="Admin Settings"
+          title="Tenant Admin Settings"
+          aria-label="Tenant Admin Settings"
         >
           <Settings size={20} strokeWidth={1.75} aria-hidden={true} />
         </Link>
       </aside>
 
-      {/* 2. Main content area: Filters + Queue Table + Right Detail Panel */}
+      {/* 2. Main content area: Queue View or Team Workload View */}
       <div className="staff-content-area">
-        {/* Table Panel */}
-        <section className="staff-table-panel">
-          {/* Header & Filters bar */}
-          <div style={{ marginBottom: "1rem" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "baseline",
-                marginBottom: "0.75rem",
-                flexWrap: "wrap",
-                gap: "0.5rem",
-              }}
-            >
-              <div>
-                <h1 style={{ fontSize: "1.5rem", margin: 0, color: "var(--text)" }}>
-                  Operational Issue Queue
-                </h1>
-                <p
-                  style={{ margin: "2px 0 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}
-                >
-                  {issues.length} reports in queue for {tenant.district || tenant.name}
-                </p>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                {(statusFilter || deptFilter || wardFilter || searchQuery) && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setSearchParams(new URLSearchParams());
+        {viewMode === "team" ? (
+          /* TEAM WORKLOAD VIEW */
+          <section className="staff-table-panel" aria-label="Team Workload View">
+            <div style={{ marginBottom: "1.5rem" }}>
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
+              >
+                <div>
+                  <h1
+                    style={{
+                      fontSize: "1.75rem",
+                      fontFamily: "var(--font-display)",
+                      fontWeight: 700,
+                      margin: 0,
+                      color: "var(--text)",
                     }}
                   >
-                    Clear filters
-                  </Button>
-                )}
+                    Department & Team Workload
+                  </h1>
+                  <p
+                    style={{
+                      margin: "4px 0 0 0",
+                      fontSize: "0.875rem",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Real-time operational capacity, active backlog, and SLA compliance across
+                    departments in {tenant.name}
+                  </p>
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => setView("queue")}>
+                  &larr; Return to Queue
+                </Button>
               </div>
             </div>
 
-            {/* Filter controls row */}
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                gap: "0.625rem",
-                padding: "0.75rem",
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "1.25rem",
+                marginBottom: "2rem",
               }}
             >
-              {/* Search */}
-              <div style={{ position: "relative" }}>
-                <TextInput
-                  placeholder="Search ID or description..."
-                  value={searchQuery}
-                  onChange={(e) => updateFilters("q", e.target.value)}
-                  style={{
-                    paddingLeft: "2.25rem",
-                    minHeight: "36px",
-                    height: "36px",
-                    fontSize: "0.8125rem",
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    left: "0.75rem",
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "var(--text-subtle)",
-                    pointerEvents: "none",
-                  }}
-                  aria-hidden="true"
-                >
-                  <Search size={14} strokeWidth={1.75} />
-                </div>
-              </div>
+              {deptMetrics.map((dept) => {
+                const openCount =
+                  typeof dept.metrics.open_count === "number" ? dept.metrics.open_count : 0;
+                const totalIssues = dept.metrics.total_issues || 1;
+                const loadPercent = Math.min(
+                  100,
+                  Math.round((openCount / Math.max(1, totalIssues)) * 100)
+                );
+                const sla =
+                  typeof dept.metrics.sla_compliance_pct === "number"
+                    ? dept.metrics.sla_compliance_pct
+                    : 100;
 
-              {/* Status filter */}
-              <Select
-                value={statusFilter}
-                onChange={(e) => updateFilters("status", e.target.value)}
-                style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
-              >
-                <option value="">All Statuses</option>
-                <option value="submitted">Submitted</option>
-                <option value="triaged">Triaged</option>
-                <option value="assigned">Assigned</option>
-                <option value="in_progress">In Progress</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
-                <option value="reopened">Reopened</option>
-                <option value="duplicate">Duplicate</option>
-                <option value="rejected">Rejected</option>
-              </Select>
-
-              {/* Department filter */}
-              <Select
-                value={deptFilter}
-                onChange={(e) => updateFilters("dept", e.target.value)}
-                style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
-              >
-                <option value="">All Departments</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </Select>
-
-              {/* Ward filter */}
-              <Select
-                value={wardFilter}
-                onChange={(e) => updateFilters("ward", e.target.value)}
-                style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
-              >
-                <option value="">All Wards</option>
-                {wards.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    Ward {w.ward_number}: {w.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          {/* Table container */}
-          {loading ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-              <Skeleton height="44px" />
-              <Skeleton height="44px" />
-              <Skeleton height="44px" />
-            </div>
-          ) : errorMsg ? (
-            <ErrorState
-              title="Queue error"
-              message={errorMsg}
-              onRetry={() => {
-                void fetchIssues();
-              }}
-            />
-          ) : issues.length === 0 ? (
-            <EmptyState
-              title="No issues found in queue"
-              description="No reports match your current filter parameters."
-            />
-          ) : (
-            <div
-              style={{
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
-                overflow: "hidden",
-              }}
-            >
-              <table
-                className="queue-table"
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "0.875rem",
-                  textAlign: "left",
-                }}
-              >
-                <thead>
-                  <tr
-                    style={{
-                      backgroundColor: "var(--surface-sunken)",
-                      borderBottom: "1px solid var(--border)",
-                      color: "var(--text-muted)",
-                      fontSize: "0.75rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    <th style={{ padding: "0.75rem 1rem" }}>Priority</th>
-                    <th style={{ padding: "0.75rem 1rem" }}>Public ID</th>
-                    <th style={{ padding: "0.75rem 1rem" }}>Category</th>
-                    <th style={{ padding: "0.75rem 1rem" }}>Ward</th>
-                    <th style={{ padding: "0.75rem 1rem" }}>SLA Deadline</th>
-                    <th style={{ padding: "0.75rem 1rem" }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {issues.map((issue) => {
-                    const isSelected = selectedIssue?.publicId === issue.publicId;
-                    const isFlashing = flashingIssueId === issue.publicId;
-                    const score =
-                      issue.priority?.override?.score ?? issue.priority?.breakdown?.score ?? 30;
-                    const catName =
-                      issue.category?.names?.[locale] ||
-                      issue.category?.name ||
-                      issue.category?.code ||
-                      "Issue";
-                    const sla = formatSlaRemaining(issue);
-
-                    return (
-                      <tr
-                        key={issue.publicId}
-                        onClick={() => selectIssue(issue.publicId)}
-                        tabIndex={0}
-                        role="button"
-                        aria-pressed={isSelected}
-                        className={isFlashing ? "row-flashing" : ""}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            selectIssue(issue.publicId);
-                          }
-                        }}
+                return (
+                  <SignPlate key={dept.department_id} label={dept.department_code.toUpperCase()}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: "0.5rem",
+                      }}
+                    >
+                      <h2
                         style={{
-                          borderBottom: "1px solid var(--border)",
-                          backgroundColor: isSelected ? "var(--surface-sunken)" : "transparent",
-                          cursor: "pointer",
-                          transition: "background-color var(--dur-fast) var(--ease-out)",
+                          fontSize: "1.125rem",
+                          margin: 0,
+                          color: "var(--text)",
+                          fontWeight: 700,
                         }}
                       >
-                        <td style={{ padding: "0.75rem 1rem" }}>
-                          <PriorityMeter priority={score} />
-                        </td>
-                        <td
+                        {dept.department_name}
+                      </h2>
+                      <span
+                        style={{
+                          fontSize: "0.8125rem",
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: "var(--r-sm)",
+                          backgroundColor: sla >= 85 ? "var(--sign-50)" : "var(--kerb-50)",
+                          color: sla >= 85 ? "var(--sign-700)" : "var(--kerb-700)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {sla}% SLA
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        margin: "1rem 0 0.5rem 0",
+                      }}
+                    >
+                      <div>
+                        <span
                           style={{
-                            padding: "0.75rem 1rem",
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Active Open
+                        </span>
+                        <div
+                          style={{
+                            fontSize: "1.75rem",
+                            fontFamily: "var(--font-display)",
                             fontWeight: 700,
+                            color: "var(--text)",
                             fontVariantNumeric: "tabular-nums",
                           }}
                         >
-                          {issue.publicId}
-                        </td>
-                        <td style={{ padding: "0.75rem 1rem", fontWeight: 500 }}>{catName}</td>
-                        <td style={{ padding: "0.75rem 1rem", color: "var(--text-muted)" }}>
-                          {issue.location?.wardId || "Ward —"}
-                        </td>
-                        <td style={{ padding: "0.75rem 1rem" }}>
-                          <span
+                          {dept.metrics.open_count}
+                        </div>
+                      </div>
+                      <div>
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Total Assigned
+                        </span>
+                        <div
+                          style={{
+                            fontSize: "1.75rem",
+                            fontFamily: "var(--font-display)",
+                            fontWeight: 700,
+                            color: "var(--text-muted)",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {dept.metrics.total_issues}
+                        </div>
+                      </div>
+                      <div>
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          P50 Median
+                        </span>
+                        <div
+                          style={{
+                            fontSize: "1.75rem",
+                            fontFamily: "var(--font-display)",
+                            fontWeight: 700,
+                            color: "var(--text)",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {typeof dept.metrics.median_resolution_hours === "number"
+                            ? `${dept.metrics.median_resolution_hours}h`
+                            : "—"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: "0.75rem",
+                          color: "var(--text-muted)",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        <span>Capacity Utilization</span>
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{loadPercent}%</span>
+                      </div>
+                      <div
+                        style={{
+                          height: "6px",
+                          backgroundColor: "var(--surface-sunken)",
+                          borderRadius: "3px",
+                          overflow: "hidden",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${loadPercent}%`,
+                            height: "100%",
+                            backgroundColor:
+                              loadPercent > 70
+                                ? "var(--kerb-500)"
+                                : loadPercent > 40
+                                  ? "var(--paint-500)"
+                                  : "var(--sign-600)",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </SignPlate>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
+          /* QUEUE TABLE PANEL */
+          <section className="staff-table-panel" aria-label="Operational Issue Queue">
+            {/* Header & Filters bar */}
+            <div style={{ marginBottom: "1rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  marginBottom: "0.75rem",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                }}
+              >
+                <div>
+                  <h1
+                    style={{
+                      fontSize: "1.5rem",
+                      fontFamily: "var(--font-display)",
+                      fontWeight: 700,
+                      margin: 0,
+                      color: "var(--text)",
+                    }}
+                  >
+                    Operational Issue Queue
+                  </h1>
+                  <p
+                    style={{
+                      margin: "2px 0 0 0",
+                      fontSize: "0.8125rem",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {issues.length} reports in queue for {tenant.district || tenant.name} (Milestone
+                    Rank)
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <Button variant="secondary" size="sm" onClick={() => setView("team")}>
+                    Team Workload
+                  </Button>
+                  {(statusFilter || deptFilter || wardFilter || searchQuery) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSearchParams(new URLSearchParams());
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Filter controls row */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                  gap: "0.625rem",
+                  padding: "0.75rem",
+                  backgroundColor: "var(--surface)",
+                  borderRadius: "var(--r-md)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {/* Search */}
+                <div style={{ position: "relative" }}>
+                  <TextInput
+                    placeholder="Search ID or description..."
+                    value={searchQuery}
+                    onChange={(e) => updateFilters("q", e.target.value)}
+                    style={{
+                      paddingLeft: "2.25rem",
+                      minHeight: "36px",
+                      height: "36px",
+                      fontSize: "0.8125rem",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: "0.75rem",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      color: "var(--text-subtle)",
+                      pointerEvents: "none",
+                    }}
+                    aria-hidden="true"
+                  >
+                    <Search size={14} strokeWidth={1.75} />
+                  </div>
+                </div>
+
+                {/* Status filter */}
+                <Select
+                  value={statusFilter}
+                  onChange={(e) => updateFilters("status", e.target.value)}
+                  style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="submitted">Submitted</option>
+                  <option value="triaged">Triaged</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="closed">Closed</option>
+                  <option value="reopened">Reopened</option>
+                  <option value="duplicate">Duplicate</option>
+                  <option value="rejected">Rejected</option>
+                </Select>
+
+                {/* Department filter */}
+                <Select
+                  value={deptFilter}
+                  onChange={(e) => updateFilters("dept", e.target.value)}
+                  style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
+                >
+                  <option value="">All Departments</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </Select>
+
+                {/* Ward filter */}
+                <Select
+                  value={wardFilter}
+                  onChange={(e) => updateFilters("ward", e.target.value)}
+                  style={{ minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
+                >
+                  <option value="">All Wards</option>
+                  {wards.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      Ward {w.ward_number}: {w.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            {/* Table container */}
+            {loading ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <Skeleton height="44px" />
+                <Skeleton height="44px" />
+                <Skeleton height="44px" />
+              </div>
+            ) : errorMsg ? (
+              <ErrorState
+                title="Queue error"
+                message={errorMsg}
+                onRetry={() => {
+                  void fetchIssues();
+                }}
+              />
+            ) : issues.length === 0 ? (
+              <EmptyState
+                title="No issues found in queue"
+                description="No reports match your current filter parameters."
+              />
+            ) : (
+              <div
+                style={{
+                  backgroundColor: "var(--surface)",
+                  borderRadius: "var(--r-md)",
+                  border: "1px solid var(--border)",
+                  overflow: "hidden",
+                }}
+              >
+                <table
+                  className="queue-table"
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: "0.875rem",
+                    textAlign: "left",
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        backgroundColor: "var(--surface-sunken)",
+                        borderBottom: "1px solid var(--border)",
+                        color: "var(--text-muted)",
+                        fontSize: "0.75rem",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        fontWeight: 700,
+                      }}
+                    >
+                      <th style={{ padding: "0.75rem 1rem", width: "120px" }}>Priority</th>
+                      <th style={{ padding: "0.75rem 1rem", width: "140px" }}>Public ID</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Category</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Ward</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>SLA Deadline</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issues.map((issue) => {
+                      const isSelected = selectedIssue?.publicId === issue.publicId;
+                      const isFlashing = flashingIssueId === issue.publicId;
+                      const score =
+                        issue.priority?.override?.score ?? issue.priority?.breakdown?.score ?? 30;
+                      const catName =
+                        issue.category?.names?.[locale] ||
+                        issue.category?.name ||
+                        issue.category?.code ||
+                        "Issue";
+                      const sla = formatSlaRemaining(issue);
+
+                      return (
+                        <tr
+                          key={issue.publicId}
+                          onClick={() => selectIssue(issue.publicId)}
+                          tabIndex={0}
+                          role="button"
+                          aria-pressed={isSelected}
+                          className={isFlashing ? "row-flashing" : ""}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              selectIssue(issue.publicId);
+                            }
+                          }}
+                          style={{
+                            borderBottom: "1px solid var(--border)",
+                            backgroundColor: isSelected ? "var(--surface-sunken)" : "transparent",
+                            cursor: "pointer",
+                            position: "relative",
+                            borderTop: sla.breached ? "2px solid var(--kerb-500)" : undefined,
+                          }}
+                        >
+                          <td style={{ padding: "0.75rem 1rem" }}>
+                            <PriorityMeter priority={score} />
+                          </td>
+                          <td
                             style={{
-                              fontSize: "0.8125rem",
-                              fontWeight: 600,
-                              color: sla.breached ? "var(--kerb-600)" : "var(--text)",
+                              padding: "0.75rem 1rem",
+                              fontWeight: 700,
+                              fontFamily: "var(--font-mono)",
                               fontVariantNumeric: "tabular-nums",
                             }}
                           >
-                            {sla.text}
-                          </span>
-                        </td>
-                        <td style={{ padding: "0.75rem 1rem" }}>
-                          <StatusChip status={issue.status} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                              <Milestone
+                                label={getWardCode(issue.location?.wardId)}
+                                status={issue.status}
+                                size="sm"
+                              />
+                              <span>{issue.publicId}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: "0.75rem 1rem", fontWeight: 500 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <CategoryIcon category={issue.category?.code || "other"} size={18} />
+                              <span>{catName}</span>
+                            </div>
+                          </td>
+                          <td
+                            style={{
+                              padding: "0.75rem 1rem",
+                              color: "var(--text-muted)",
+                              fontSize: "0.8125rem",
+                            }}
+                          >
+                            {getWardDisplayName(issue.location?.wardId)}
+                          </td>
+                          <td style={{ padding: "0.75rem 1rem" }}>
+                            <span
+                              style={{
+                                fontSize: "0.8125rem",
+                                fontWeight: 700,
+                                color: sla.breached ? "var(--kerb-600)" : "var(--text)",
+                                fontVariantNumeric: "tabular-nums",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "0.25rem",
+                              }}
+                            >
+                              {sla.breached && <AlertTriangle size={13} strokeWidth={2.2} />}
+                              {sla.text}
+                            </span>
+                          </td>
+                          <td style={{ padding: "0.75rem 1rem" }}>
+                            <StatusChip status={issue.status} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
 
-        {/* 3. Right Detail Panel */}
+        {/* 3. Right Inspector (Desktop & Sheet) */}
         {selectedIssue && (
-          <aside className="staff-detail-panel" aria-label="Issue Detail Panel">
-            {/* Header */}
+          <aside className="staff-detail-panel" aria-label="Issue Inspector Panel">
+            {/* Header with Milestone motif & close */}
             <div
               style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}
             >
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <span
+              <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+                <Milestone
+                  label={getWardCode(selectedIssue.location?.wardId)}
+                  status={selectedIssue.status}
+                  size="md"
+                />
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span
+                      style={{
+                        fontSize: "1.25rem",
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {selectedIssue.publicId}
+                    </span>
+                    <StatusChip status={selectedIssue.status} />
+                  </div>
+                  <p
                     style={{
-                      fontSize: "1.25rem",
-                      fontWeight: 700,
-                      fontVariantNumeric: "tabular-nums",
+                      margin: "2px 0 0 0",
+                      fontSize: "0.8125rem",
+                      color: "var(--text-muted)",
                     }}
                   >
-                    {selectedIssue.publicId}
-                  </span>
-                  <StatusChip status={selectedIssue.status} />
+                    {selectedIssue.category?.names?.[locale] ||
+                      selectedIssue.category?.name ||
+                      selectedIssue.category?.code}
+                  </p>
                 </div>
-                <p
-                  style={{ margin: "2px 0 0 0", fontSize: "0.875rem", color: "var(--text-muted)" }}
-                >
-                  {selectedIssue.category?.names?.[locale] ||
-                    selectedIssue.category?.name ||
-                    selectedIssue.category?.code}
-                </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => selectIssue(null)}
                 className="touch-target"
-                aria-label="Close detail panel"
+                aria-label="Close inspector panel"
                 style={{
                   background: "none",
                   border: "none",
@@ -929,6 +1259,9 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                   cursor: "pointer",
                   width: "36px",
                   height: "36px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
                 <X size={18} strokeWidth={1.75} aria-hidden={true} />
@@ -938,7 +1271,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
             {/* Description */}
             <div
               style={{
-                padding: "0.75rem",
+                padding: "0.875rem",
                 backgroundColor: "var(--surface)",
                 borderRadius: "var(--r-md)",
                 border: "1px solid var(--border)",
@@ -949,56 +1282,116 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
               {selectedIssue.description}
             </div>
 
-            {/* SECTION A: Priority Factor Bars & Override */}
+            {/* SECTION A: Large Score & Override Side-by-Side */}
             <div
-              className="sign-plate"
-              style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: selectedIssue.priority?.override ? "1fr 1fr" : "1fr",
+                gap: "0.75rem",
+              }}
             >
-              <div
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
-              >
-                <span
-                  style={{
-                    fontSize: "0.8125rem",
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    color: "var(--text-subtle)",
-                  }}
-                >
-                  Priority Breakdown
-                </span>
-                <span
-                  style={{
-                    fontSize: "1.25rem",
-                    fontWeight: 700,
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {selectedIssue.priority?.override?.score ??
-                    selectedIssue.priority?.breakdown?.score ??
-                    0}
-                </span>
-              </div>
-
-              {selectedIssue.priority?.override && (
+              <SignPlate label="Computed Priority Score">
                 <div
                   style={{
-                    backgroundColor: "var(--paint-50)",
-                    border: "1px solid var(--paint-300)",
-                    borderRadius: "var(--r-sm)",
-                    padding: "0.5rem 0.625rem",
-                    fontSize: "0.8125rem",
-                    color: "var(--paint-700)",
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "0.25rem",
+                    margin: "0.25rem 0",
                   }}
                 >
-                  <strong>Override Justification:</strong> {selectedIssue.priority.override.reason}{" "}
-                  (by {selectedIssue.priority.override.byUserId || "staff"})
+                  <span
+                    style={{
+                      fontSize: "3.25rem",
+                      fontFamily: "var(--font-display)",
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      fontVariantNumeric: "tabular-nums",
+                      color: "var(--text)",
+                    }}
+                  >
+                    {selectedIssue.priority?.breakdown?.score ??
+                      selectedIssue.priority?.override?.score ??
+                      0}
+                  </span>
+                  <span
+                    style={{ fontSize: "1.125rem", color: "var(--text-muted)", fontWeight: 500 }}
+                  >
+                    /100
+                  </span>
                 </div>
-              )}
+                <PriorityMeter
+                  priority={
+                    selectedIssue.priority?.breakdown?.score ??
+                    selectedIssue.priority?.override?.score ??
+                    0
+                  }
+                />
+              </SignPlate>
 
-              {/* 6 Factor Bars */}
-              {selectedIssue.priority?.breakdown && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {selectedIssue.priority?.override && (
+                <SignPlate
+                  label="Override Justification"
+                  style={{ borderColor: "var(--paint-400)", backgroundColor: "var(--paint-50)" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: "0.375rem",
+                      marginBottom: "0.25rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "2.25rem",
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 700,
+                        color: "var(--paint-700)",
+                        lineHeight: 1,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {selectedIssue.priority.override.score}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        color: "var(--paint-700)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Active
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      margin: "2px 0 0 0",
+                      fontSize: "0.8125rem",
+                      color: "var(--paint-900)",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {selectedIssue.priority.override.reason}
+                  </p>
+                  <span
+                    style={{
+                      fontSize: "0.6875rem",
+                      color: "var(--paint-700)",
+                      marginTop: "4px",
+                      display: "block",
+                    }}
+                  >
+                    By {selectedIssue.priority.override.byUserId || "staff"}
+                  </span>
+                </SignPlate>
+              )}
+            </div>
+
+            {/* Priority Factor Breakdown Bars (Weight & Contribution) */}
+            {selectedIssue.priority?.breakdown && (
+              <SignPlate label="Algorithm Factor Contributions">
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
                   {[
                     { label: "Safety Risk", item: selectedIssue.priority.breakdown.safety },
                     { label: "Physical Severity", item: selectedIssue.priority.breakdown.severity },
@@ -1026,7 +1419,13 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                           <span>
                             {label} ({weight}%)
                           </span>
-                          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                          <span
+                            style={{
+                              fontVariantNumeric: "tabular-nums",
+                              fontWeight: 700,
+                              color: "var(--text)",
+                            }}
+                          >
                             +{contrib.toFixed(1)}
                           </span>
                         </div>
@@ -1051,77 +1450,57 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                     );
                   })}
                 </div>
-              )}
 
-              {/* Priority Override Form */}
-              <div
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  paddingTop: "0.75rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.5rem",
-                }}
-              >
-                <span style={{ fontSize: "0.8125rem", fontWeight: 600 }}>
-                  Manual Priority Override
-                </span>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <TextInput
-                    placeholder="Score (0-100)"
-                    type="number"
-                    value={overrideScore}
-                    onChange={(e) => setOverrideScore(e.target.value)}
-                    style={{
-                      width: "110px",
-                      minHeight: "36px",
-                      height: "36px",
-                      fontSize: "0.8125rem",
-                    }}
-                  />
-                  <TextInput
-                    placeholder="Mandatory reason for override..."
-                    value={overrideReason}
-                    onChange={(e) => setOverrideReason(e.target.value)}
-                    style={{ flex: 1, minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
-                  />
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={actionLoading || !overrideScore || !overrideReason.trim()}
-                  onClick={() => {
-                    void handleOverridePriority();
+                {/* Priority Override Form with Mandatory Reason */}
+                <div
+                  style={{
+                    borderTop: "1px solid var(--border)",
+                    paddingTop: "0.75rem",
+                    marginTop: "0.75rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
                   }}
                 >
-                  Apply Override
-                </Button>
-              </div>
-            </div>
+                  <span style={{ fontSize: "0.8125rem", fontWeight: 700 }}>
+                    Apply Manual Priority Override
+                  </span>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <TextInput
+                      placeholder="Score (0-100)"
+                      type="number"
+                      value={overrideScore}
+                      onChange={(e) => setOverrideScore(e.target.value)}
+                      style={{
+                        width: "110px",
+                        minHeight: "36px",
+                        height: "36px",
+                        fontSize: "0.8125rem",
+                      }}
+                    />
+                    <TextInput
+                      placeholder="Mandatory reason for override..."
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      style={{ flex: 1, minHeight: "36px", height: "36px", fontSize: "0.8125rem" }}
+                    />
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={actionLoading || !overrideScore || !overrideReason.trim()}
+                    onClick={() => {
+                      void handleOverridePriority();
+                    }}
+                  >
+                    Apply Override
+                  </Button>
+                </div>
+              </SignPlate>
+            )}
 
-            {/* SECTION B: Status Moves & Resolution */}
-            <div
-              style={{
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
-                padding: "1rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.75rem",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "0.8125rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: "var(--text-subtle)",
-                }}
-              >
-                Workflow Transitions
-              </span>
-
+            {/* SECTION B: Allowed Status Moves & Resolution with Evidence */}
+            <SignPlate label="Workflow State Moves">
               {allowedMoves.length === 0 ? (
                 <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                   No further staff transitions available for status '{selectedIssue.status}'.
@@ -1152,9 +1531,23 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                     display: "flex",
                     flexDirection: "column",
                     gap: "0.375rem",
-                    marginTop: "0.25rem",
+                    marginTop: "0.75rem",
+                    padding: "0.75rem",
+                    backgroundColor: "var(--surface-sunken)",
+                    borderRadius: "var(--r-sm)",
+                    border: "1px solid var(--border)",
                   }}
                 >
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Resolve with Evidence
+                  </span>
                   <TextInput
                     placeholder="Evidence Key (e.g. resolve-photo-1.jpg)"
                     value={resolutionEvidenceKey}
@@ -1171,7 +1564,14 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
               )}
 
               {allowedMoves.includes("rejected") && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.375rem",
+                    marginTop: "0.5rem",
+                  }}
+                >
                   <TextInput
                     placeholder="Rejection justification reason..."
                     value={rejectionReason}
@@ -1180,30 +1580,10 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                   />
                 </div>
               )}
-            </div>
+            </SignPlate>
 
             {/* SECTION C: Assign Department Routing */}
-            <div
-              style={{
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
-                padding: "1rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.625rem",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "0.8125rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: "var(--text-subtle)",
-                }}
-              >
-                Department Routing
-              </span>
+            <SignPlate label="Department Assignment">
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <Select
                   value={selectedRouteDept}
@@ -1225,34 +1605,13 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                     void handleRouteDepartment();
                   }}
                 >
-                  Route
+                  Assign
                 </Button>
               </div>
-            </div>
+            </SignPlate>
 
-            {/* SECTION D: Duplicates & Merge */}
-            <div
-              style={{
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
-                padding: "1rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.625rem",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "0.8125rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: "var(--text-subtle)",
-                }}
-              >
-                Duplicate Management
-              </span>
-
+            {/* SECTION D: Duplicates & Merge / Unmerge */}
+            <SignPlate label="Duplicate Management">
               {selectedIssue.duplicateOf ? (
                 <div
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
@@ -1291,30 +1650,10 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                   </Button>
                 </div>
               )}
-            </div>
+            </SignPlate>
 
-            {/* SECTION E: Audit Trail as Lane Line Timeline */}
-            <div
-              style={{
-                backgroundColor: "var(--surface)",
-                borderRadius: "var(--r-md)",
-                border: "1px solid var(--border)",
-                padding: "1rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.75rem",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "0.8125rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  color: "var(--text-subtle)",
-                }}
-              >
-                Audit Trail
-              </span>
+            {/* SECTION E: Audit Trail as Milestone Lane Timeline */}
+            <SignPlate label="Audit Trail Timeline">
               {detailLoading ? (
                 <Skeleton height="60px" />
               ) : auditEvents.length === 0 ? (
@@ -1338,7 +1677,7 @@ export function StaffQueuePage({ tenant }: { tenant: TenantInfo }): React.JSX.El
                   }))}
                 />
               )}
-            </div>
+            </SignPlate>
           </aside>
         )}
       </div>

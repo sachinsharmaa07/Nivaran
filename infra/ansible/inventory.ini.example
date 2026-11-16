@@ -1,0 +1,9 @@
+# CivicPulse Ansible Inventory Example
+# INT333 DevOps Advance Configuration Management (LPU) - Sachin Kumar (12316496)
+# Connects from Ansible management server (172.31.4.105) over VPC private IP or public IP
+
+[app]
+civicpulse-app ansible_host=172.31.X.X ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/aws.pem ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[app:vars]
+ansible_python_interpreter=/usr/bin/python3

@@ -1,9 +1,20 @@
 import React, { type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
-import { MapPin, Globe, User, LogOut, FileText, Map, Shield, BarChart2 } from "lucide-react";
+import {
+  MapPin,
+  Globe,
+  User,
+  LogOut,
+  FileText,
+  Map,
+  Shield,
+  BarChart2,
+  BookOpen,
+} from "lucide-react";
 import { useTranslation } from "../utils/i18n.js";
 import { useAuth } from "../utils/authContext.js";
 import type { TenantInfo } from "../components/CityPicker.js";
+import { CivicChatbot } from "../components/CivicChatbot.js";
 
 export interface AppShellProps {
   tenant: TenantInfo;
@@ -101,7 +112,7 @@ export function AppShell({
                   fontFamily: "var(--font-display)",
                 }}
               >
-                N
+                CP
               </div>
               <span
                 style={{
@@ -111,7 +122,7 @@ export function AppShell({
                   letterSpacing: "-0.01em",
                 }}
               >
-                {t("app_title") || "Nivaran"}
+                {t("app_title") || "CivicPulse"}
               </span>
             </Link>
 
@@ -218,6 +229,34 @@ export function AppShell({
             >
               <BarChart2 size={15} strokeWidth={1.75} aria-hidden={true} />
               <span className="nav-label">Dashboard</span>
+            </Link>
+
+            <Link
+              to="/blogs"
+              className="touch-target"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.375rem",
+                padding: "0.375rem 0.625rem",
+                borderRadius: "var(--r-sm)",
+                fontSize: "0.875rem",
+                fontWeight:
+                  location.pathname.startsWith("/blogs") || location.pathname.startsWith("/updates")
+                    ? 600
+                    : 500,
+                color:
+                  location.pathname.startsWith("/blogs") || location.pathname.startsWith("/updates")
+                    ? "var(--text)"
+                    : "var(--text-muted)",
+                backgroundColor:
+                  location.pathname.startsWith("/blogs") || location.pathname.startsWith("/updates")
+                    ? "var(--surface-sunken)"
+                    : "transparent",
+              }}
+            >
+              <BookOpen size={15} strokeWidth={1.75} aria-hidden={true} />
+              <span className="nav-label">Blogs</span>
             </Link>
 
             {isStaffOrAdmin && (
@@ -339,6 +378,9 @@ export function AppShell({
       <main style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative" }}>
         {children}
       </main>
+
+      {/* Global Civic Redressal Assistant Doodle Trigger */}
+      <CivicChatbot tenant={tenant} />
     </div>
   );
 }

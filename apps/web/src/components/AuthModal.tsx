@@ -23,6 +23,14 @@ export function AuthModal({
   const [consent, setConsent] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setGoogleLoading(false);
+      setErrorMsg("");
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -53,6 +61,22 @@ export function AuthModal({
         await login(identifier, password, tenantSlug);
         onClose();
       }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const quickSignIn = async (ident: string) => {
+    setIdentifier(ident);
+    setPassword("Password123!");
+    setConsent(true);
+    setErrorMsg("");
+    setLoading(true);
+    try {
+      await login(ident, "Password123!", tenantSlug);
+      onClose();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -165,13 +189,15 @@ export function AuthModal({
 
         {/* Continue with Google */}
         <div style={{ marginBottom: "1.25rem" }}>
-          <a
-            href={consent ? googleAuthUrl : undefined}
-            onClick={(e) => {
+          <button
+            type="button"
+            onClick={() => {
               if (!consent) {
-                e.preventDefault();
                 setErrorMsg("Please check the consent box below before continuing with Google.");
+                return;
               }
+              setGoogleLoading(true);
+              window.location.assign(googleAuthUrl);
             }}
             style={{
               display: "flex",
@@ -185,14 +211,13 @@ export function AuthModal({
               border: `1px solid ${consent ? "var(--border-control)" : "var(--border)"}`,
               backgroundColor: consent ? "var(--surface)" : "var(--surface-sunken)",
               color: consent ? "var(--text)" : "var(--text-subtle)",
-              textDecoration: "none",
               fontWeight: 600,
               fontSize: "0.875rem",
-              cursor: consent ? "pointer" : "not-allowed",
-              opacity: consent ? 1 : 0.65,
+              cursor: consent && !googleLoading ? "pointer" : "not-allowed",
+              opacity: consent && !googleLoading ? 1 : 0.65,
               transition: "all var(--dur-fast) var(--ease-out)",
             }}
-            aria-disabled={!consent}
+            disabled={!consent || googleLoading}
           >
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
               <path
@@ -212,8 +237,8 @@ export function AuthModal({
                 fill="#EA4335"
               />
             </svg>
-            <span>Continue with Google</span>
-          </a>
+            <span>{googleLoading ? "Connecting to Google..." : "Continue with Google"}</span>
+          </button>
           {!consent && (
             <p
               style={{
@@ -285,14 +310,14 @@ export function AuthModal({
             )}
           </Field>
 
-          <Field label="Password" required>
+          <Field label="Password" hint="For demo & testing accounts, use: Password123!" required>
             {({ id, "aria-describedby": ariaDescribedBy, "aria-invalid": ariaInvalid }) => (
               <TextInput
                 id={id}
                 aria-describedby={ariaDescribedBy}
                 isInvalid={ariaInvalid}
                 type="password"
-                placeholder="••••••••"
+                placeholder="Password123!"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -350,6 +375,147 @@ export function AuthModal({
             {tab === "login" ? t("login") || "Sign In" : t("register") || "Create Account"}
           </Button>
         </form>
+
+        {/* 1-Click Demo Testing Credentials */}
+        <div
+          style={{
+            marginTop: "1.25rem",
+            paddingTop: "1rem",
+            borderTop: "1px dashed var(--border)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "0.5rem",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "0.75rem",
+                fontWeight: 700,
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              1-Click Demo Accounts (Password123!)
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: "0.45rem",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => void quickSignIn("citizen@punjab.local")}
+              style={{
+                padding: "0.4rem 0.5rem",
+                fontSize: "0.75rem",
+                borderRadius: "var(--r-sm)",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--surface-sunken)",
+                color: "var(--text)",
+                cursor: "pointer",
+                textAlign: "left",
+                lineHeight: 1.25,
+              }}
+            >
+              👤 <strong>Citizen</strong>
+              <div style={{ fontSize: "0.6875rem", color: "var(--text-muted)" }}>
+                citizen@punjab.local
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void quickSignIn("staff@punjab.local")}
+              style={{
+                padding: "0.4rem 0.5rem",
+                fontSize: "0.75rem",
+                borderRadius: "var(--r-sm)",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--surface-sunken)",
+                color: "var(--text)",
+                cursor: "pointer",
+                textAlign: "left",
+                lineHeight: 1.25,
+              }}
+            >
+              👷 <strong>Staff / Inspector</strong>
+              <div style={{ fontSize: "0.6875rem", color: "var(--text-muted)" }}>
+                staff@punjab.local
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void quickSignIn("depthead@punjab.local")}
+              style={{
+                padding: "0.4rem 0.5rem",
+                fontSize: "0.75rem",
+                borderRadius: "var(--r-sm)",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--surface-sunken)",
+                color: "var(--text)",
+                cursor: "pointer",
+                textAlign: "left",
+                lineHeight: 1.25,
+              }}
+            >
+              🏛️ <strong>Dept Head</strong>
+              <div style={{ fontSize: "0.6875rem", color: "var(--text-muted)" }}>
+                depthead@punjab.local
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void quickSignIn("admin@punjab.local")}
+              style={{
+                padding: "0.4rem 0.5rem",
+                fontSize: "0.75rem",
+                borderRadius: "var(--r-sm)",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--surface-sunken)",
+                color: "var(--text)",
+                cursor: "pointer",
+                textAlign: "left",
+                lineHeight: 1.25,
+              }}
+            >
+              👔 <strong>Commissioner</strong>
+              <div style={{ fontSize: "0.6875rem", color: "var(--text-muted)" }}>
+                admin@punjab.local
+              </div>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void quickSignIn("platform@amritsar.local")}
+            style={{
+              width: "100%",
+              marginTop: "0.45rem",
+              padding: "0.35rem 0.5rem",
+              fontSize: "0.6875rem",
+              borderRadius: "var(--r-sm)",
+              border: "1px dashed var(--border)",
+              backgroundColor: "transparent",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              textAlign: "center",
+            }}
+          >
+            🌐 Platform Superadmin: <strong>platform@amritsar.local</strong>
+          </button>
+        </div>
       </div>
     </Dialog>
   );

@@ -103,6 +103,68 @@ export class PlatformDb {
     return res.rows[0] ?? null;
   }
 
+  async findTenantIdByUserIdentifier(identifier: string): Promise<string | null> {
+    const res = await this.pool.query<{ tenant_id: string }>(
+      `SELECT tenant_id FROM users 
+       WHERE LOWER(email) = LOWER($1) OR phone = $1 
+       LIMIT 1`,
+      [identifier]
+    );
+    return res.rows[0]?.tenant_id ?? null;
+  }
+
+  async updateTenant(
+    id: string,
+    data: Partial<{
+      name: string;
+      code: string;
+      district: string;
+      default_locale: string;
+      enabled_locales: string[];
+      center: { lat: number; lon: number };
+    }>
+  ): Promise<TenantRow | null> {
+    const sets: string[] = ["updated_at = NOW()"];
+    const params: unknown[] = [id];
+    let idx = 2;
+
+    if (data.name !== undefined) {
+      sets.push(`name = $${idx++}`);
+      params.push(data.name);
+    }
+    if (data.code !== undefined) {
+      sets.push(`code = $${idx++}`);
+      params.push(data.code);
+    }
+    if (data.district !== undefined) {
+      sets.push(`district = $${idx++}`);
+      params.push(data.district);
+    }
+    if (data.default_locale !== undefined) {
+      sets.push(`default_locale = $${idx++}`);
+      params.push(data.default_locale);
+    }
+    if (data.enabled_locales !== undefined) {
+      sets.push(`enabled_locales = $${idx++}`);
+      params.push(data.enabled_locales);
+    }
+    if (data.center !== undefined) {
+      sets.push(`center = ST_SetSRID(ST_MakePoint($${idx++}, $${idx++}), 4326)`);
+      params.push(data.center.lon, data.center.lat);
+    }
+
+    const res = await this.pool.query<TenantRow>(
+      `UPDATE tenants SET ${sets.join(", ")}
+       WHERE id = $1
+       RETURNING id, slug, code, name, ulb_type, state_code, district, lgd_code,
+                 json_build_object('lat', ST_Y(center::geometry), 'lon', ST_X(center::geometry)) AS center,
+                 default_locale, enabled_locales, timezone, status, sla_calendar,
+                 created_at, updated_at`,
+      params
+    );
+    return res.rows[0] ?? null;
+  }
+
   /**
    * Public summary for a state: per-ULB open count, SLA compliance, and median resolution.
    * Privacy rule: any cell under 10 issues is masked (returns nulls).
@@ -198,6 +260,8 @@ export class PlatformDb {
    */
   async onboardTenant(data: {
     name: string;
+    slug?: string | undefined;
+    code?: string | undefined;
     state_code: string;
     district: string;
     ulb_type: string;
@@ -211,8 +275,8 @@ export class PlatformDb {
     try {
       await client.query("BEGIN");
 
-      // Generate slug and code from name
-      let baseSlug = data.name
+      // Generate slug and code from name or explicit input
+      let baseSlug = (data.slug || data.name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
@@ -227,7 +291,7 @@ export class PlatformDb {
       }
 
       // Generate code (e.g. 3-4 letters uppercase)
-      const letters = data.name.replace(/[^a-zA-Z]/g, "").toUpperCase();
+      const letters = (data.code || data.name).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
       const baseCode = letters.slice(0, 4) || "TEN";
       let code = baseCode;
       let codeCounter = 1;

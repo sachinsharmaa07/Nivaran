@@ -1,0 +1,145 @@
+---
+# CivicPulse — Ansible Server Configuration & Deployment Playbook
+# Course: INT333 DevOps Advance Configuration Management (LPU)
+# Student: Sachin Kumar (Reg: 12316496)
+# Configures the application server: Docker, NRPE, 2GB Swap, DuckDNS & 12-hour auto-update
+
+- name: Configure CivicPulse Application Server
+  hosts: app
+  become: true
+  vars:
+    app_dir: /opt/civicpulse
+    nagios_server_ip: "172.31.9.205"
+    duckdns_domain: "{{ lookup('env', 'DUCKDNS_DOMAIN') | default('civicpulse', true) }}"
+    duckdns_token: "{{ lookup('env', 'DUCKDNS_TOKEN') | default('', true) }}"
+
+  tasks:
+    - name: Ensure 2GB swap file exists to prevent OOM on t3.small (2GB RAM)
+      ansible.builtin.shell: |
+        if ! grep -q "swapfile" /etc/fstab; then
+          fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          sysctl vm.swappiness=20
+          echo 'vm.swappiness=20' >> /etc/sysctl.conf
+        fi
+      args:
+        creates: /swapfile
+
+    - name: Install Docker, NRPE, and essential utilities
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - docker.io
+          - docker-compose-v2
+          - nagios-nrpe-server
+          - nagios-plugins
+          - curl
+          - ca-certificates
+          - gnupg
+          - cron
+        state: present
+
+    - name: Enable and start Docker service
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add ubuntu user to docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Configure NRPE allowed_hosts to permit Nagios server
+      ansible.builtin.lineinfile:
+        path: /etc/nagios/nrpe.cfg
+        regexp: "^allowed_hosts="
+        line: "allowed_hosts=127.0.0.1,::1,{{ nagios_server_ip }}"
+        state: present
+
+    - name: Copy CivicPulse NRPE command definitions
+      ansible.builtin.copy:
+        src: nrpe.cfg
+        dest: /etc/nagios/nrpe.d/civicpulse.cfg
+        mode: "0644"
+
+    - name: Restart and enable NRPE service
+      ansible.builtin.service:
+        name: nagios-nrpe-server
+        state: restarted
+        enabled: true
+
+    - name: Create application deployment directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Copy production Docker Compose file and Caddyfile
+      ansible.builtin.copy:
+        src: "../prod/{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0644"
+      loop:
+        - compose.prod.yml
+        - Caddyfile
+
+    - name: Copy example production environment file if .env.prod does not exist
+      ansible.builtin.copy:
+        src: "../prod/.env.prod.example"
+        dest: "{{ app_dir }}/.env.prod"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+        force: false
+
+    - name: Deploy 12-hour container image auto-update script
+      ansible.builtin.copy:
+        src: auto-update.sh
+        dest: "{{ app_dir }}/auto-update.sh"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Configure 12-hour cron job to fetch latest images and auto-update
+      ansible.builtin.cron:
+        name: "CivicPulse 12-hour container image auto-update"
+        minute: "0"
+        hour: "*/12"
+        user: "root"
+        job: "/bin/bash {{ app_dir }}/auto-update.sh >> /var/log/nivaran-autoupdate.log 2>&1"
+
+    - name: Configure DuckDNS dynamic DNS update cron (every 5 minutes)
+      ansible.builtin.cron:
+        name: "CivicPulse DuckDNS dynamic IP update"
+        minute: "*/5"
+        user: "root"
+        job: 'curl -sk "https://www.duckdns.org/update?domains={{ duckdns_domain }}&token={{ duckdns_token }}&ip=" > /var/log/duckdns.log 2>&1'
+      when: duckdns_token | length > 0
+
+    - name: Start CivicPulse application containers with Docker Compose
+      ansible.builtin.command:
+        cmd: docker compose -f compose.prod.yml up -d
+        chdir: "{{ app_dir }}"
+
+    - name: Verify application readiness endpoint (/readyz)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:80/readyz
+        status_code: 200
+      register: readyz_check
+      retries: 15
+      delay: 4
+      until: readyz_check.status == 200
+      ignore_errors: true
+
+    - name: Display deployment readiness status
+      ansible.builtin.debug:
+        msg: "Application readiness check returned HTTP {{ readyz_check.status | default('failed') }}"

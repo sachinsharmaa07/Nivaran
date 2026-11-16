@@ -361,6 +361,52 @@ describe("B1g: Google Sign-in Flow", () => {
       expect(res.body.error.code).toBe("STATE_MISMATCH");
     });
 
+    it("handles Google Identity Services g_state JSON cookie collision gracefully", async () => {
+      const sub = `google_sub_${Date.now()}`;
+      const email = `gsi_collision_${Date.now()}@punjab.local`;
+      mockIdTokenToReturn = await signMockIdToken({
+        sub,
+        email,
+        email_verified: true,
+        name: "GSI User",
+      });
+
+      const state = await signOAuthState({ nonce: "test-nonce", tenantSlug: "demo-punjab" });
+      const res = await request(app)
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(state)}`)
+        .set("Cookie", [
+          "g_verifier=mock-verifier",
+          'g_state={"i_l":0}',
+          `g_state=${encodeURIComponent(state)}`,
+        ]);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(process.env["WEB_ORIGIN"]);
+    });
+
+    it("matches valid state cookie when browser sends multiple g_state cookies from different paths", async () => {
+      const sub = `google_sub_${Date.now()}`;
+      const email = `multi_cookie_${Date.now()}@punjab.local`;
+      mockIdTokenToReturn = await signMockIdToken({
+        sub,
+        email,
+        email_verified: true,
+        name: "Multi Cookie User",
+      });
+
+      const state = await signOAuthState({ nonce: "test-nonce", tenantSlug: "demo-punjab" });
+      const res = await request(app)
+        .get(`/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(state)}`)
+        .set("Cookie", [
+          "g_verifier=mock-verifier",
+          "g_state=stale-path-slash-state",
+          `g_state=${encodeURIComponent(state)}`,
+        ]);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(process.env["WEB_ORIGIN"]);
+    });
+
     it("fails with STATE_SIGNATURE_INVALID if state signature is tampered", async () => {
       const tampered = "tampered-invalid-state";
       const res = await request(app)

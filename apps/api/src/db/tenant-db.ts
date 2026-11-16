@@ -746,9 +746,32 @@ export class TenantDb {
         return { valid: true, wardId: matchRes.rows[0].id };
       }
 
+      // Fallback: If not inside an exact polygon box, check if within 35 km of any municipal ward
+      const nearestRes = await this.pool.query<{ id: string; dist_m: number }>(
+        `SELECT id, ST_Distance(
+           boundary::geography,
+           ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
+         ) AS dist_m
+         FROM wards
+         WHERE tenant_id = $1 AND boundary IS NOT NULL
+         ORDER BY dist_m ASC
+         LIMIT 1`,
+        [this.tenantId, lon, lat]
+      );
+
+      const nearestWardId = nearestRes.rows[0]?.id;
+      if (
+        nearestRes.rowCount &&
+        nearestRes.rowCount > 0 &&
+        nearestWardId &&
+        Number(nearestRes.rows[0]?.dist_m) <= 35000
+      ) {
+        return { valid: true, wardId: nearestWardId };
+      }
+
       return {
         valid: false,
-        reason: "Location is outside the municipal service area (not inside any ward)",
+        reason: "Location is outside the municipal service area",
       };
     }
 

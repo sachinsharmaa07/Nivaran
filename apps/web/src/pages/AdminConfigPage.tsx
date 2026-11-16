@@ -658,7 +658,17 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
               {tenant.district || tenant.name} ({tenant.slug})
             </span>
           </div>
-          <h1 style={{ margin: 0, fontSize: "1.75rem", color: "var(--text)" }}>
+          <h1
+            style={{
+              margin: 0,
+              fontFamily: "var(--font-display)",
+              fontSize: "2.25rem",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "-0.01em",
+              color: "var(--text)",
+            }}
+          >
             Municipal Configuration
           </h1>
         </div>
@@ -1676,7 +1686,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                 >
                   Statutory Defaults
                 </Button>
-                <Button type="submit" variant="primary" disabled={totalWeight !== 100}>
+                <Button type="submit" variant="cta" disabled={totalWeight !== 100}>
                   Save Calibrated Weights
                 </Button>
               </div>
@@ -1782,7 +1792,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   step="0.1"
                   value={simSafety}
                   onChange={(e) => setSimSafety(parseFloat(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", accentColor: "var(--primary)" }}
                 />
               </div>
 
@@ -1800,7 +1810,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   step="1"
                   value={simSeverity}
                   onChange={(e) => setSimSeverity(parseInt(e.target.value, 10))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", accentColor: "var(--primary)" }}
                 />
               </div>
 
@@ -1818,7 +1828,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   step="0.05"
                   value={simSlaElapsed}
                   onChange={(e) => setSimSlaElapsed(parseFloat(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", accentColor: "var(--primary)" }}
                 />
               </div>
 
@@ -1836,7 +1846,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   step="1"
                   value={simDuplicates}
                   onChange={(e) => setSimDuplicates(parseInt(e.target.value, 10))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", accentColor: "var(--primary)" }}
                 />
               </div>
 
@@ -1853,6 +1863,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   type="checkbox"
                   checked={simFacilityNear}
                   onChange={(e) => setSimFacilityNear(e.target.checked)}
+                  style={{ accentColor: "var(--primary)" }}
                 />
                 Within 100m of Hospital / School / Critical Facility
               </label>
@@ -1871,7 +1882,7 @@ export function AdminConfigPage({ tenant }: { tenant: TenantInfo }): React.JSX.E
                   step="0.1"
                   value={simWardVuln}
                   onChange={(e) => setSimWardVuln(parseFloat(e.target.value))}
-                  style={{ width: "100%" }}
+                  style={{ width: "100%", accentColor: "var(--primary)" }}
                 />
               </div>
             </div>

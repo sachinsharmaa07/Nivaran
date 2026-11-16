@@ -1,0 +1,71 @@
+# CivicPulse Production Caddyfile
+# Automatic HTTPS, reverse proxy, compression, and security headers
+
+{
+    admin off
+}
+
+:80 {
+    # Health and readiness probes for Nagios & local healthchecks
+    @health {
+        path /readyz
+        path /healthz
+    }
+    handle @health {
+        reverse_proxy api:4000
+    }
+
+    # Direct IP or unencrypted HTTP access fallback
+    handle {
+        @isDomain {
+            not header_regexp Host ^[0-9.]+$
+        }
+        redir @isDomain https://{host}{uri} permanent
+
+        @api {
+            path /api/*
+        }
+        handle @api {
+            reverse_proxy api:4000
+        }
+
+        handle {
+            reverse_proxy web:5173
+        }
+    }
+}
+
+{$DOMAIN:localhost} {
+    encode gzip zstd
+
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(self)"
+        -Server
+    }
+
+    # API endpoints and health checks proxy to Express API
+    @api {
+        path /api/*
+        path /healthz
+        path /readyz
+    }
+    reverse_proxy @api api:4000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Everything else serves the Web SPA
+    reverse_proxy web:5173 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

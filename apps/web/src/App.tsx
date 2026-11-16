@@ -5,7 +5,7 @@ import { I18nProvider } from "./utils/i18n.js";
 import { AuthProvider } from "./utils/authContext.js";
 import { CityPicker, type TenantInfo } from "./components/CityPicker.js";
 import { AuthModal } from "./components/AuthModal.js";
-import { AppShell, ToastProvider, LaneLineLoader } from "./ui/index.js";
+import { AppShell, ToastProvider, LaneLineLoader, Illustration404, Button } from "./ui/index.js";
 
 // Lazy-loaded route components per React.lazy requirements
 const CitizenHomePage = lazy(() =>
@@ -29,6 +29,43 @@ const PublicDashboardPage = lazy(() =>
 const AuthErrorPage = lazy(() =>
   import("./pages/AuthErrorPage.js").then((m) => ({ default: m.AuthErrorPage }))
 );
+const NotificationsPage = lazy(() =>
+  import("./pages/NotificationsPage.js").then((m) => ({ default: m.NotificationsPage }))
+);
+const MePage = lazy(() => import("./pages/MePage.js").then((m) => ({ default: m.MePage })));
+const UpdatesListPage = lazy(() =>
+  import("./pages/UpdatesListPage.js").then((m) => ({ default: m.UpdatesListPage }))
+);
+const ArticlePage = lazy(() =>
+  import("./pages/ArticlePage.js").then((m) => ({ default: m.ArticlePage }))
+);
+const StaffUpdatesPage = lazy(() =>
+  import("./pages/StaffUpdatesPage.js").then((m) => ({ default: m.StaffUpdatesPage }))
+);
+
+function NotFoundPage(): React.JSX.Element {
+  return (
+    <div style={{ padding: "4rem 1.5rem", maxWidth: "480px" }}>
+      <Illustration404 size={120} />
+      <h1
+        className="display-text-sm"
+        style={{
+          fontSize: "clamp(1.5rem, 1.2rem + 1vw, 2rem)",
+          margin: "1.5rem 0 0.5rem 0",
+          lineHeight: 1.1,
+        }}
+      >
+        Page not found
+      </h1>
+      <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem", fontSize: "0.9375rem" }}>
+        The page you requested does not exist or has been moved.
+      </p>
+      <Link to="/">
+        <Button variant="primary">Return to issue map</Button>
+      </Link>
+    </div>
+  );
+}
 
 const DEFAULT_TENANT: TenantInfo = {
   id: "demo-punjab-id",
@@ -205,38 +242,82 @@ export function App(): JSX.Element {
                         element={<PublicDashboardPage tenant={tenant} />}
                       />
 
-                      {/* 7. Friendly OAuth Error Page */}
+                      {/* 7. Notifications */}
+                      <Route
+                        path="/notifications"
+                        element={
+                          <NotificationsPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                          />
+                        }
+                      />
+
+                      {/* 8. Me (profile, language, delete account, sign out) */}
+                      <Route
+                        path="/me"
+                        element={
+                          <MePage tenant={tenant} onOpenAuth={() => setAuthModalOpen(true)} />
+                        }
+                      />
+
+                      {/* 9. Civic Updates & Blogs */}
+                      <Route path="/updates" element={<UpdatesListPage tenant={tenant} />} />
+                      <Route
+                        path="/:tenantSlug/updates"
+                        element={<UpdatesListPage tenant={tenant} />}
+                      />
+                      <Route path="/updates/:slug" element={<ArticlePage tenant={tenant} />} />
+                      <Route
+                        path="/:tenantSlug/updates/:slug"
+                        element={<ArticlePage tenant={tenant} />}
+                      />
+                      <Route path="/blogs" element={<UpdatesListPage tenant={tenant} />} />
+                      <Route
+                        path="/:tenantSlug/blogs"
+                        element={<UpdatesListPage tenant={tenant} />}
+                      />
+                      <Route
+                        path="/blogs/new"
+                        element={
+                          <StaffUpdatesPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                            isBlogMode={true}
+                          />
+                        }
+                      />
+                      <Route
+                        path="/blogs/editor"
+                        element={
+                          <StaffUpdatesPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                            isBlogMode={true}
+                          />
+                        }
+                      />
+                      <Route path="/blogs/:slug" element={<ArticlePage tenant={tenant} />} />
+                      <Route
+                        path="/:tenantSlug/blogs/:slug"
+                        element={<ArticlePage tenant={tenant} />}
+                      />
+                      <Route path="/staff/updates" element={<StaffUpdatesPage tenant={tenant} />} />
+                      <Route
+                        path="/updates/editor"
+                        element={
+                          <StaffUpdatesPage
+                            tenant={tenant}
+                            onOpenAuth={() => setAuthModalOpen(true)}
+                          />
+                        }
+                      />
+
+                      {/* 10. Friendly OAuth Error Page */}
                       <Route path="/auth/error" element={<AuthErrorPage />} />
 
                       {/* 404 Not Found Page */}
-                      <Route
-                        path="*"
-                        element={
-                          <div style={{ padding: "4rem 1.5rem", textAlign: "center" }}>
-                            <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
-                              404 — Page Not Found
-                            </h1>
-                            <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>
-                              The page you requested does not exist or has been moved.
-                            </p>
-                            <Link
-                              to="/"
-                              style={{
-                                display: "inline-flex",
-                                padding: "0.625rem 1.25rem",
-                                borderRadius: "var(--r-md)",
-                                backgroundColor: "var(--primary)",
-                                color: "var(--on-primary)",
-                                textDecoration: "none",
-                                fontWeight: 600,
-                                fontSize: "0.875rem",
-                              }}
-                            >
-                              Return to Issue Map
-                            </Link>
-                          </div>
-                        }
-                      />
+                      <Route path="*" element={<NotFoundPage />} />
                     </Routes>
                   </Suspense>
                 </RouteErrorBoundary>

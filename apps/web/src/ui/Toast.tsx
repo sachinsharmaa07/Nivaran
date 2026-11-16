@@ -12,6 +12,7 @@ export interface ToastItem {
   id: string;
   message: string;
   variant?: "info" | "success" | "warning" | "error";
+  type?: "info" | "success" | "warning" | "error";
   onUndo?: (() => void) | undefined;
   durationMs?: number;
 }
@@ -35,6 +36,7 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
     const newToast: ToastItem = {
       id,
       durationMs: toast.onUndo ? 8000 : 4500, // 8s for undo per DESIGN.md §8
+      variant: toast.variant || toast.type || "info",
       ...toast,
     };
 

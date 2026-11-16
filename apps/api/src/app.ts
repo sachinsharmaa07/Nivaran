@@ -11,6 +11,9 @@ import { publicRouter } from "./routes/public.js";
 import { issuesRouter } from "./routes/issues.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { metricsRouter } from "./routes/metrics.js";
+import { postsRouter } from "./routes/posts.js";
+import { mediaRouter } from "./routes/media.js";
+import { MEDIA_UPLOAD_ROOT } from "./services/media-service.js";
 import { connectMongo } from "./db/mongo.js";
 
 // Connect to Mongo lazily (non-blocking start; healthz checks TCP separately)
@@ -20,21 +23,29 @@ connectMongo().catch(() => {
 
 export const app: Express = express();
 
+// Trust reverse proxy (Caddy / ALB) so req.ip and req.secure reflect real client
+app.set("trust proxy", 1);
+
 // Raw-body parser for photo upload endpoint (must come BEFORE express.json)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (
+  const webOrigin = process.env["WEB_ORIGIN"];
+  const domain = process.env["DOMAIN"];
+  const isAllowed =
     origin &&
     (origin === "http://localhost:5173" ||
       origin === "http://127.0.0.1:5173" ||
-      origin.startsWith("http://localhost:"))
-  ) {
+      origin.startsWith("http://localhost:") ||
+      (webOrigin && origin === webOrigin) ||
+      (domain && (origin === `https://${domain}` || origin === `http://${domain}`)));
+
+  if (isAllowed) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-Tenant-Slug, Accept"
+      "Content-Type, Authorization, X-Requested-With, X-Tenant-Slug, Accept, Idempotency-Key"
     );
   }
   if (req.method === "OPTIONS") {
@@ -45,16 +56,29 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/v1/issues/upload", express.raw({ type: "*/*", limit: "8mb" }));
+app.use("/api/v1/media", express.raw({ type: "*/*", limit: "6mb" }));
 app.use(express.json());
 app.use(requestIdMiddleware);
 app.use(authMiddleware);
 
-// Health and readiness endpoints
-app.get("/healthz", (_req, res) => {
+// Static uploads serving (immutable cache for media variants)
+app.use(
+  "/uploads",
+  express.static(MEDIA_UPLOAD_ROOT, {
+    setHeaders: (res, filePath) => {
+      if (filePath.includes("/media/")) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  })
+);
+
+// Health and readiness endpoints (accessible directly or via /api/v1)
+app.get(["/healthz", "/api/v1/healthz"], (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-app.get("/readyz", (_req, res) => {
+app.get(["/readyz", "/api/v1/readyz"], (_req, res) => {
   void checkDependencies().then((checks) => {
     const ready = checks.mongo && checks.postgres && checks.redis;
     if (!ready) {
@@ -76,6 +100,8 @@ app.use("/api/v1/platform", platformRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/public", publicRouter);
 app.use("/api/v1/issues", issuesRouter);
+app.use("/api/v1/posts", postsRouter);
+app.use("/api/v1/media", mediaRouter);
 app.use("/api/v1/notifications", notificationsRouter);
 app.use("/api/v1/metrics", metricsRouter);
 

@@ -11,6 +11,8 @@ import {
   Skeleton,
   EmptyState,
   ErrorState,
+  SignPlate,
+  CategoryIcon,
 } from "../ui/index.js";
 
 interface MyIssueItem {
@@ -68,15 +70,8 @@ export function MyReportsPage({
 
   if (!user) {
     return (
-      <div
-        style={{
-          maxWidth: "540px",
-          margin: "3rem auto",
-          padding: "1.5rem",
-          textAlign: "center",
-        }}
-      >
-        <div className="sign-plate" style={{ padding: "2.5rem 1.75rem" }}>
+      <div style={{ maxWidth: "540px", margin: "3rem auto", padding: "1.5rem" }}>
+        <SignPlate label="Track reports" style={{ padding: "2.5rem 1.75rem", textAlign: "left" }}>
           <div
             style={{
               width: "48px",
@@ -87,7 +82,7 @@ export function MyReportsPage({
               alignItems: "center",
               justifyContent: "center",
               color: "var(--text-subtle)",
-              margin: "0 auto 1.25rem auto",
+              marginBottom: "1.25rem",
               border: "1px solid var(--border)",
             }}
             aria-hidden="true"
@@ -95,8 +90,11 @@ export function MyReportsPage({
             <FileText size={24} strokeWidth={1.75} />
           </div>
 
-          <h1 style={{ margin: "0 0 0.5rem 0", fontSize: "1.5rem", color: "var(--text)" }}>
-            Track Your Civic Reports
+          <h1
+            className="display-text-sm"
+            style={{ margin: "0 0 0.5rem 0", color: "var(--text)", lineHeight: 1.1 }}
+          >
+            Track your civic reports
           </h1>
           <p
             style={{
@@ -106,14 +104,14 @@ export function MyReportsPage({
               marginBottom: "1.75rem",
             }}
           >
-            Sign in with your mobile number or email to view the progress of issues you've reported
-            or verified.
+            Sign in with your mobile number or email to view the progress of issues you have
+            reported or verified across {tenant.district || tenant.name}.
           </p>
           <Button variant="cta" onClick={onOpenAuth} style={{ minWidth: "160px" }}>
-            <span>Sign In / Register</span>
+            <span>Sign in or register</span>
             <ArrowRight size={15} strokeWidth={1.75} aria-hidden={true} />
           </Button>
-        </div>
+        </SignPlate>
       </div>
     );
   }
@@ -125,23 +123,31 @@ export function MyReportsPage({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "flex-end",
-          marginBottom: "1.5rem",
+          marginBottom: "1.75rem",
           gap: "1rem",
           flexWrap: "wrap",
         }}
       >
         <div>
-          <h1 style={{ margin: "0 0 0.25rem 0", fontSize: "1.75rem", color: "var(--text)" }}>
-            {t("my_reports") || "My Reports"}
+          <h1
+            className="display-text"
+            style={{
+              margin: "0 0 0.375rem 0",
+              fontSize: "clamp(2rem, 1.8rem + 1vw, 2.5rem)",
+              color: "var(--text)",
+              lineHeight: 1.05,
+            }}
+          >
+            {t("my_reports") || "My reports"}
           </h1>
-          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.875rem" }}>
-            Issues you submitted or supported in {tenant.district || tenant.name}
+          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9375rem" }}>
+            Issues you submitted or confirmed in {tenant.district || tenant.name}
           </p>
         </div>
 
-        <Link to="/">
+        <Link to="/" style={{ textDecoration: "none" }}>
           <Button variant="cta">
-            <Plus size={15} strokeWidth={1.75} aria-hidden={true} />
+            <Plus size={16} strokeWidth={1.75} aria-hidden={true} />
             <span>Report an issue</span>
           </Button>
         </Link>
@@ -149,9 +155,9 @@ export function MyReportsPage({
 
       {loading ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <Skeleton height="72px" />
-          <Skeleton height="72px" />
-          <Skeleton height="72px" />
+          <Skeleton height="76px" />
+          <Skeleton height="76px" />
+          <Skeleton height="76px" />
         </div>
       ) : errorMsg ? (
         <ErrorState
@@ -166,9 +172,9 @@ export function MyReportsPage({
           title="No reports submitted yet"
           description="You haven't reported any potholes, broken lights or overflowing bins in this municipality."
           action={
-            <Link to="/">
+            <Link to="/" style={{ textDecoration: "none" }}>
               <Button variant="cta">
-                <Plus size={15} strokeWidth={1.75} aria-hidden={true} />
+                <Plus size={16} strokeWidth={1.75} aria-hidden={true} />
                 <span>Submit your first report</span>
               </Button>
             </Link>
@@ -177,6 +183,7 @@ export function MyReportsPage({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           {issues.map((issue) => {
+            const catCode = issue.category?.code || "other";
             const catName =
               issue.category?.names?.[locale] ||
               issue.category?.name ||
@@ -198,72 +205,100 @@ export function MyReportsPage({
                   border: "1px solid var(--border)",
                   textDecoration: "none",
                   color: "inherit",
+                  gap: "1rem",
                   transition: "background-color var(--dur-fast) var(--ease-out)",
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0, marginRight: "1rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "1rem",
+                    minWidth: 0,
+                    flex: 1,
+                  }}
+                >
                   <div
                     style={{
+                      width: "40px",
+                      height: "40px",
+                      borderRadius: "var(--r-md)",
+                      backgroundColor: "var(--surface-sunken)",
+                      border: "1px solid var(--border)",
                       display: "flex",
                       alignItems: "center",
-                      gap: "0.625rem",
-                      marginBottom: "0.25rem",
+                      justifyContent: "center",
+                      flexShrink: 0,
                     }}
+                    aria-hidden="true"
                   >
-                    <span
+                    <CategoryIcon category={catCode} size={22} />
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
                       style={{
-                        fontWeight: 700,
-                        fontSize: "0.875rem",
-                        color: "var(--text)",
-                        fontVariantNumeric: "tabular-nums",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.625rem",
+                        marginBottom: "0.25rem",
                       }}
                     >
-                      {issue.publicId}
-                    </span>
-                    <StatusChip status={issue.status} />
-                  </div>
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          fontSize: "0.875rem",
+                          color: "var(--text)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {issue.publicId}
+                      </span>
+                      <StatusChip status={issue.status} />
+                    </div>
 
-                  <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}>
-                    {catName}
-                  </div>
+                    <div style={{ fontSize: "0.9375rem", fontWeight: 600, color: "var(--text)" }}>
+                      {catName}
+                    </div>
 
-                  <p
-                    style={{
-                      margin: "0.25rem 0 0 0",
-                      fontSize: "0.8125rem",
-                      color: "var(--text-muted)",
-                      lineHeight: 1.35,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {issue.description}
-                  </p>
+                    <p
+                      style={{
+                        margin: "0.25rem 0 0 0",
+                        fontSize: "0.8125rem",
+                        color: "var(--text-muted)",
+                        lineHeight: 1.35,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {issue.description}
+                    </p>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      marginTop: "0.375rem",
-                      fontSize: "0.75rem",
-                      color: "var(--text-subtle)",
-                    }}
-                  >
-                    <span>
-                      {new Date(issue.createdAt).toLocaleDateString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </span>
-                    {issue.landmark && (
-                      <>
-                        <span>•</span>
-                        <span>Near {issue.landmark}</span>
-                      </>
-                    )}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.75rem",
+                        marginTop: "0.375rem",
+                        fontSize: "0.75rem",
+                        color: "var(--text-subtle)",
+                      }}
+                    >
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {new Date(issue.createdAt).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </span>
+                      {issue.landmark && (
+                        <>
+                          <span>•</span>
+                          <span>Near {issue.landmark}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 
