@@ -417,7 +417,7 @@ async function seedShowcaseIncidentsForTenant(
 }
 
 export async function seedDatabase(options: { includeSynthetic?: boolean } = {}): Promise<void> {
-  if (process.env["NODE_ENV"] === "production") {
+  if (process.env["NODE_ENV"] === "production" && process.env["ALLOW_DEMO_SEED"] !== "true") {
     throw new Error(
       "SECURITY ERROR: Refusing to run demo seed with fake passwords in production! Use 'make seed-prod' instead."
     );
