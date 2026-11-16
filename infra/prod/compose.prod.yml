@@ -104,7 +104,7 @@ services:
   api:
     image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    env_file: ${ENV_FILE:-.env.prod.example}
+    env_file: ${ENV_FILE:-.env.prod}
     environment:
       NODE_ENV: production
       IN_DOCKER: "1"
@@ -138,7 +138,7 @@ services:
   worker:
     image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    env_file: ${ENV_FILE:-.env.prod.example}
+    env_file: ${ENV_FILE:-.env.prod}
     environment:
       NODE_ENV: production
       IN_DOCKER: "1"
@@ -182,7 +182,7 @@ services:
   ai:
     image: ${DOCKERHUB_USERNAME:-sachinsharma}/civicpulse-ai:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    env_file: ${ENV_FILE:-.env.prod.example}
+    env_file: ${ENV_FILE:-.env.prod}
     environment:
       NODE_ENV: production
       PORT: "8000"

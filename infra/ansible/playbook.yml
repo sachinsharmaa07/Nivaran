@@ -92,6 +92,7 @@
         - compose.prod.yml
         - Caddyfile
         - pg-init.sql
+        - .env.prod.example
 
     - name: Copy production environment file
       ansible.builtin.copy:
@@ -131,7 +132,7 @@
 
     - name: Start CivicPulse application containers with Docker Compose
       ansible.builtin.command:
-        cmd: docker compose -f compose.prod.yml up -d
+        cmd: docker compose --env-file .env.prod -f compose.prod.yml up -d
         chdir: "{{ app_dir }}"
 
     - name: Verify application readiness endpoint (/readyz)
