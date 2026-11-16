@@ -9,6 +9,7 @@ apps/web/vite.config.js*
 # Environment — never commit real secrets
 .env
 .env.*
+!.env.prod.example
 .env.prod
 
 # Terraform local files
