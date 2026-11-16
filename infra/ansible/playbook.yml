@@ -81,7 +81,7 @@
         group: ubuntu
         mode: "0755"
 
-    - name: Copy production Docker Compose file and Caddyfile
+    - name: Copy production Docker Compose file, Caddyfile, and SQL init
       ansible.builtin.copy:
         src: "../prod/{{ item }}"
         dest: "{{ app_dir }}/{{ item }}"
@@ -91,15 +91,19 @@
       loop:
         - compose.prod.yml
         - Caddyfile
+        - pg-init.sql
 
-    - name: Copy example production environment file if .env.prod does not exist
+    - name: Copy production environment file
       ansible.builtin.copy:
-        src: "../prod/.env.prod.example"
+        src: "{{ item }}"
         dest: "{{ app_dir }}/.env.prod"
         owner: ubuntu
         group: ubuntu
         mode: "0600"
         force: false
+      with_first_found:
+        - "../prod/.env.prod"
+        - "../prod/.env.prod.example"
 
     - name: Deploy 12-hour container image auto-update script
       ansible.builtin.copy:
