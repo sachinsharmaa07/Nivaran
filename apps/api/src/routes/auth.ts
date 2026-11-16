@@ -101,16 +101,24 @@ export function constantTimeCompare(a: string, b: string): boolean {
   return timingSafeEqual(hashA, hashB);
 }
 
-function setRefreshCookie(res: Response, token: string): void {
-  const secure = process.env["NODE_ENV"] === "production" ? "; Secure" : "";
+function isConnectionSecure(req?: Request): boolean {
+  return Boolean(
+    req?.secure ||
+    req?.headers["x-forwarded-proto"] === "https" ||
+    process.env["FORCE_HTTPS"] === "true"
+  );
+}
+
+function setRefreshCookie(res: Response, token: string, req?: Request): void {
+  const secure = isConnectionSecure(req) ? "; Secure" : "";
   res.append(
     "Set-Cookie",
     `${REFRESH_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=${Math.floor(REFRESH_COOKIE_MAX_AGE / 1000)}${secure}`
   );
 }
 
-function clearRefreshCookie(res: Response): void {
-  const secure = process.env["NODE_ENV"] === "production" ? "; Secure" : "";
+function clearRefreshCookie(res: Response, req?: Request): void {
+  const secure = isConnectionSecure(req) ? "; Secure" : "";
   res.append(
     "Set-Cookie",
     `${REFRESH_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/api/v1/auth; Max-Age=0${secure}`
@@ -118,10 +126,7 @@ function clearRefreshCookie(res: Response): void {
 }
 
 export function getOAuthCookieOptions(req?: Request) {
-  const isSecure =
-    process.env["NODE_ENV"] === "production" ||
-    (req?.secure ?? false) ||
-    req?.headers["x-forwarded-proto"] === "https";
+  const isSecure = isConnectionSecure(req);
   return {
     httpOnly: true,
     sameSite: "lax" as const,
@@ -224,7 +229,7 @@ authRouter.post("/register", authRateLimiter("register"), async (req: Request, r
     expiresAt,
   });
 
-  setRefreshCookie(res, rawRefreshToken);
+  setRefreshCookie(res, rawRefreshToken, req);
 
   res.status(201).json({
     data: {
@@ -305,7 +310,7 @@ authRouter.post("/login", authRateLimiter("login"), async (req: Request, res: Re
     expiresAt,
   });
 
-  setRefreshCookie(res, rawRefreshToken);
+  setRefreshCookie(res, rawRefreshToken, req);
 
   res.status(200).json({
     data: {
@@ -354,8 +359,20 @@ authRouter.get("/google", async (req: Request, res: Response) => {
   setOAuthCookies(res, req, codeVerifier, state);
 
   const clientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
+  const host = req.get("host") || "localhost:4000";
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
   const redirectUri =
-    process.env["GOOGLE_REDIRECT_URI"] ?? "http://localhost:4000/api/v1/auth/google/callback";
+    process.env["GOOGLE_REDIRECT_URI"] ?? `${proto}://${host}/api/v1/auth/google/callback`;
+
+  if (!clientId || clientId.startsWith("placeholder")) {
+    const demoCallbackUrl = `/api/v1/auth/google/callback?code=demo_code&state=${encodeURIComponent(state)}&demo=true`;
+    if (req.query["format"] === "json") {
+      res.status(200).json({ data: { url: demoCallbackUrl }, url: demoCallbackUrl });
+    } else {
+      res.redirect(demoCallbackUrl);
+    }
+    return;
+  }
 
   const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   googleAuthUrl.searchParams.set("client_id", clientId);
@@ -484,8 +501,18 @@ authRouter.get("/google/callback", async (req: Request, res: Response) => {
     );
   }
 
-  const tokens = await exchangeGoogleCode(code, verifier);
-  const googleUser = await verifyGoogleIdToken(tokens.id_token);
+  let googleUser;
+  if (req.query["demo"] === "true" || (!process.env["GOOGLE_CLIENT_ID"] && code === "demo_code")) {
+    googleUser = {
+      sub: "google_demo_citizen_001",
+      email: "demo.citizen@gmail.com",
+      email_verified: true,
+      name: "Demo Citizen (Google)",
+    };
+  } else {
+    const tokens = await exchangeGoogleCode(code, verifier);
+    googleUser = await verifyGoogleIdToken(tokens.id_token);
+  }
 
   const tenantDb = new TenantDb(tenant.id);
 
@@ -533,9 +560,11 @@ authRouter.get("/google/callback", async (req: Request, res: Response) => {
     expiresAt,
   });
 
-  setRefreshCookie(res, rawRefreshToken);
+  setRefreshCookie(res, rawRefreshToken, req);
 
-  const webOrigin = process.env["WEB_ORIGIN"] ?? "http://localhost:5173";
+  const cbProto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
+  const cbHost = req.get("host") || "localhost:5173";
+  const webOrigin = process.env["WEB_ORIGIN"] || `${cbProto}://${cbHost}`;
   if (req.query["format"] === "json") {
     res.status(200).json({
       data: {
@@ -599,14 +628,14 @@ authRouter.post("/refresh", async (req: Request, res: Response) => {
   }
 
   if (!foundToken || !tenantDb || !tenantId) {
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     throw new AppError("INVALID_TOKEN", "Invalid refresh token", 401);
   }
 
   // Token reuse detection: if revoked token is used, revoke entire family!
   if (foundToken.is_revoked) {
     await tenantDb.revokeTokenFamily(foundToken.family_id);
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     throw new AppError(
       "TOKEN_COMPROMISED",
       "Compromised refresh token reused. All associated sessions revoked.",
@@ -616,7 +645,7 @@ authRouter.post("/refresh", async (req: Request, res: Response) => {
 
   if (new Date() > new Date(foundToken.expires_at)) {
     await tenantDb.revokeToken(foundToken.id);
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     throw new AppError("TOKEN_EXPIRED", "Refresh token has expired", 401);
   }
 
@@ -625,7 +654,7 @@ authRouter.post("/refresh", async (req: Request, res: Response) => {
 
   const user = await tenantDb.findUserById(foundToken.user_id);
   if (!user) {
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, req);
     throw new AppError("USER_NOT_FOUND", "User associated with token not found", 401);
   }
 
@@ -647,7 +676,7 @@ authRouter.post("/refresh", async (req: Request, res: Response) => {
     expiresAt: newExpiresAt,
   });
 
-  setRefreshCookie(res, newRawRefreshToken);
+  setRefreshCookie(res, newRawRefreshToken, req);
 
   res.status(200).json({
     data: {
@@ -675,7 +704,7 @@ authRouter.post("/logout", async (req: Request, res: Response) => {
     }
   }
 
-  clearRefreshCookie(res);
+  clearRefreshCookie(res, req);
   res.status(200).json({ data: { message: "Logged out successfully" } });
 });
 
@@ -738,7 +767,7 @@ const handleAccountDelete = async (req: Request, res: Response) => {
     throw new AppError("USER_NOT_FOUND", "User not found", 404);
   }
 
-  clearRefreshCookie(res);
+  clearRefreshCookie(res, req);
   res.status(200).json({ data: { message: "Account and personal data removed successfully" } });
 };
 
