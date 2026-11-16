@@ -37,7 +37,7 @@ function loadEnv() {
 
 loadEnv();
 
-const domain = process.env.DOMAIN || process.argv[2];
+const domain = process.argv[2] || process.env.DOMAIN;
 const adminEmail = process.env.PLATFORM_ADMIN_EMAIL || "admin@nivaran.gov.in";
 const adminPassword = process.env.PLATFORM_ADMIN_PASSWORD;
 
@@ -47,7 +47,8 @@ if (!domain) {
   process.exit(1);
 }
 
-const baseUrl = `https://${domain}`;
+const baseUrl = domain.startsWith("http") ? domain : `https://${domain}`;
+const targetHost = new URL(baseUrl).hostname;
 
 async function testHttpEndpoint(path, expectedStatus = 200) {
   const url = `${baseUrl}${path}`;
@@ -112,7 +113,7 @@ function checkPortClosed(host, port, timeoutMs = 2500) {
 }
 
 async function runSmokeTest() {
-  console.log(`==> Running Nivaran production smoke test against https://${domain}...\n`);
+  console.log(`==> Running Nivaran production smoke test against ${baseUrl}...\n`);
 
   let allPassed = true;
 
@@ -142,7 +143,7 @@ async function runSmokeTest() {
   ];
 
   for (const svc of portsToTest) {
-    const res = await checkPortClosed(domain, svc.port);
+    const res = await checkPortClosed(targetHost, svc.port);
     const pass = res.closed;
     console.log(`[${pass ? "PASS" : "FAIL"}] Port ${svc.port} (${svc.name}): ${res.detail}`);
     if (!pass) allPassed = false;
